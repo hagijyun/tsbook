@@ -1,0 +1,137 @@
+---
+title: "コード"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=2]
+---
+
+
+```{r Setup用, echo = FALSE, include = FALSE}
+# 作業ディレクトリ・・・お好みの場所をご設定ください
+setwd("C:/cygwin/home/NOC/book/doc")
+
+# コンソール出力の文字幅
+options(width = 84)
+
+# plot関連の設定
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # PDFファイルに出力する場合
+  pdf(height = 7 / (4/3))
+
+  # フォント情報はラスタライズする
+  require(showtext)
+  font.add("meiryo", "meiryo.ttc")
+  par(family = "meiryo")
+  showtext.begin()
+}
+```
+
+
+
+
+
+#Rで時系列データを扱う際の基礎
+
+##時系列データの扱いに適したオブジェクト
+
+```{r コード3.1, collapse=TRUE, fig.show = 'hide'}
+#【ナイル川における年間流量に関するデータ】
+
+# データの内容を表示
+Nile
+
+# データを図示
+plot(Nile)
+```
+
+
+```{r コード3.2, collapse=TRUE, fig.show = 'hide'}
+#【大気中の二酸化炭素濃度に関するデータ】
+
+# データの読み込み
+Ryori <- read.csv("CO2.csv")
+
+# データをts型に変換し、2014年12月までで打ち切る
+y_all <- ts(data = Ryori$CO2, start = c(1987, 1), frequency = 12)
+y <- window(y_all, end = c(2014, 12))
+
+# データの内容を表示
+y
+
+# データを図示
+plot(y)
+```
+
+
+```{r コード3.3, collapse=TRUE}
+#【複数のtsクラスのオブジェクトを扱う関数】
+
+# 人工的な第2時系列（Nileの開始時点を5年前にしてみる）
+Nile2 <- ts(Nile, start = 1866)
+
+# 複数の時系列を統合
+ts.union(Nile, Nile2)
+
+# 人工的な第2時系列（Nileの値を2倍にしてみる）
+Nile2 <- 2 * Nile
+
+# 複数の時系列を同一領域にまとめてプロット
+ts.plot(cbind(Nile, Nile2), lty = c("solid", "dashed"))
+```
+
+
+
+##時間情報の扱い
+
+```{r コード3.4, collapse=TRUE}
+#【tsクラスのオブジェクトに関する時間情報】
+
+# 開始時点、終了時点、周期
+tsp(Nile)
+
+# 時間の値の並び
+time(Nile)
+```
+
+
+```{r コード3.5, collapse=TRUE}
+#【Dateクラスのオブジェクト】
+
+# 文字列をDateクラスのオブジェクトに変換
+day <- as.Date("2000-01-01")
+
+# 構造を確認
+str(day)
+
+# 連続したDateクラスのオブジェクトの生成
+days <- seq(from = as.Date("2000-01-01"), to = as.Date("2000-01-31"),
+            by = "day")
+
+# 内容を確認
+days
+
+# 曜日情報の抽出
+weekdays(days)
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r plotをpdf化する際の終了処理, echo = FALSE, include = FALSE}
+#【plotをpdf化する際の終了処理】
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext.end()
+
+  dev.off()
+}
+```

@@ -1,0 +1,503 @@
+---
+title: "コード"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=3]
+---
+
+
+```{r Setup用, echo = FALSE, include = FALSE}
+# 作業ディレクトリ・・・お好みの場所をご設定ください
+setwd("C:/cygwin/home/NOC/book/doc")
+
+# コンソール出力の文字幅
+options(width = 84)
+
+# plot関連の設定
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # PDFファイルに出力する場合
+  pdf(height = 7 / (4/3))
+
+  # フォント情報はラスタライズする
+  require(showtext)
+  font.add("meiryo", "meiryo.ttc")
+  par(family = "meiryo")
+  showtext.begin()
+}
+```
+
+
+
+
+
+#時系列分析ひとめぐり
+
+##目的の確認とデータの収集
+
+##データの下調べ
+
+###横軸時間のプロット
+
+```{r コード4.1, collapse=TRUE}
+#【横軸時間のプロット】
+
+# 描画に関する前処理（グラフのデフォルト設定を保存してから、これを変更する）
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2)); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 2, 1))
+
+# (a) ナイル川における年間流量
+plot(Nile, main = "(a)")
+
+# (b) 大気中の二酸化炭素濃度
+# データの読み込み
+Ryori <- read.csv("CO2.csv")
+
+# データをts型に変換し、2014年12月までで打ち切る
+y_all <- ts(data = Ryori$CO2, start = c(1987, 1), frequency = 12)
+y <- window(y_all, end = c(2014, 12))
+y_CO2 <- y
+plot(y_CO2, main = "(b)")
+
+# (c) 英国における四半期毎のガス消費量
+plot(UKgas, main = "(c)")
+
+# (d) 非線形なモデルから生成した人工的なデータ
+load("BenchmarkNonLinearModel.RData")
+y_nonlinear <- ts(y)
+plot(y_nonlinear, main = "(d)")
+
+# 描画に関する後処理
+par(oldpar)
+```
+
+
+
+```{r 図4.2, echo = FALSE}
+#【横軸時間のプロット（対数変換）】
+
+
+# (c) 英国における四半期毎のガス消費量（対数変換）
+UKgas_log <- log(UKgas)
+plot(UKgas_log, main = "(c)の対数")
+```
+
+
+###ヒストグラムと五数要約
+
+```{r コード4.2, collapse=TRUE}
+#【ヒストグラムと五数要約】
+
+# 描画に関する前処理（グラフのデフォルト設定を保存してから、これを変更する）
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2)); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 2, 1))
+
+# (a) ナイル川における年間流量
+hist(Nile, main = "(a)", xlab = "データの値")
+summary(Nile)
+
+# (b) 大気中の二酸化炭素濃度
+hist(y_CO2, main = "(b)", xlab = "データの値")
+summary(y_CO2)
+
+# (c) 英国における四半期毎のガス消費量
+hist(UKgas_log, main = "(c)", xlab = "データの値")
+summary(UKgas_log)
+
+# (d) 非線形なモデルから生成した人工的なデータ
+hist(y_nonlinear, main = "(d)", xlab = "データの値")
+summary(y_nonlinear)
+
+# 描画に関する後処理
+par(oldpar)
+```
+
+
+
+```{r 図4.4, echo = FALSE, results='hide'}
+#【異常値】
+
+# 描画に関する前処理（グラフのデフォルト設定を保存してから、これを変更する）
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(1, 2), pty = "s"); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 2, 1))
+
+# ある年の8月の東京の平均気温
+temperature_without_outl <- c(25.6, 25.6, 24.9, 25.1, 24.9, 25.7, 27.2, 28, 29.1, 30.2, 30.5, 30.6, 30.6, 30.2, 30.4, 29.6, 28.6, 27.9, 27.3, 27.3, 26.9, 26.5, 26.5)
+temperature_with_outl    <- c(25.6, 25.6, 24.9, 25.1, 24.9, 25.7, 27.2, 28, 29.1, 30.2, 30.5, 30.6, 30.6, 30.2, 30.4, 29.6, 28.6, 27.9, 27.3, 67.3, 26.9, 26.5, 26.5)
+
+# プロット
+ts.plot(temperature_with_outl, ylim = c(20, 40), type = "l", ylab = "摂氏気温")
+
+# ヒストグラムと五数要約
+hist(temperature_with_outl, breaks = seq(from = 20, to = 80, by = 1), 
+     xlab = "摂氏気温", ylab = "頻度", main = "")
+summary(temperature_with_outl)
+
+# 描画に関する後処理
+par(oldpar)
+```
+
+
+
+```{r コード4.3, collapse=TRUE}
+#【NAの補填】
+
+# (b) 大気中の二酸化炭素濃度
+
+# NAの位置を特定
+NA.point <- which(is.na(y_CO2))
+
+# NAの補填：前後の算術平均
+y_CO2[NA.point] <- (y_CO2[NA.point-1] + y_CO2[NA.point+1]) / 2
+```
+
+
+###自己相関係数
+
+
+```{r コード4.4, collapse=TRUE}
+#【自己相関係数】
+
+# 描画に関する前処理（グラフのデフォルト設定を保存してから、これを変更する）
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2)); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 3, 1))
+
+
+# (a) ナイル川における年間流量
+acf(Nile, main = "(a)")
+
+# (b) 大気中の二酸化炭素濃度
+acf(y_CO2, main = "(b)")
+
+# (c) 英国における四半期毎のガス消費量
+acf(UKgas_log, main = "(c)")
+
+# (d) 非線形なモデルから生成した人工的なデータ
+acf(y_nonlinear, main = "(d)")
+
+# 描画に関する後処理
+par(oldpar)
+```
+
+
+###周波数スペクトル
+
+####周波数に関する基本事項
+
+
+```{r 図4.6, echo = FALSE, results='hide'}
+#【フーリエ級数展開】
+
+# 描画に関する前処理（グラフのデフォルト設定を保存してから、これを変更する）
+oldpar <- par(no.readonly = TRUE)
+split.screen(rbind(c(0, 0.6, 0.75, 1   ),
+                   c(0, 0.6, 0.50, 0.75),
+                   c(0, 0.6, 0.25, 0.50),
+                   c(0, 0.6, 0   , 0.25)))
+
+# x軸における刻み値
+x_tick <- seq(from = 0, to = 2*pi, length.out = 1000)
+
+# 矩形信号を描画する関数
+draw_rectangle <- function(){
+  lines(x = c(   0,    0), y = c( 0,  1))
+  lines(x = c(   0, 1*pi), y = c( 1,  1))
+  lines(x = c(1*pi, 1*pi), y = c( 1, -1))
+  lines(x = c(1*pi, 2*pi), y = c(-1, -1))
+  lines(x = c(2*pi, 2*pi), y = c(-1,  0))
+}
+
+# フーリエ級数展開
+Fourie_series <- 0
+for (n in c(1, 3, 5, 7)){
+  screen((n+1)/2); par(oma = c(0, 0, 0, 0)); par(mar = c(1, 0, 0, 0))
+  
+  Fourie_series <- Fourie_series + 4/pi * sin(n * x_tick) / n
+  plot(x = x_tick, y = Fourie_series, ylim = c(-1.3, 1.3), 
+       type = "l", lty = "dashed", ann = FALSE, xaxt="n")
+  draw_rectangle()
+  axis(side = 1, at = 0:6, labels = FALSE, tcl = -0.2)
+  mtext(text = 0:6, at = 0:6, side = 1, line = 0, cex = 0.7)
+  legend("topright", legend = sprintf("%dつのsin()の和", ceiling(n/2)), cex = 0.6)
+}
+
+# 描画に関する後処理
+close.screen(all = TRUE)
+par(oldpar)
+```
+
+
+####周波数領域変換
+
+
+```{r コード4.5, collapse=TRUE}
+#【周波数領域変換】
+
+# 周波数スペクトルを描画するユーザ定義関数（tick：横軸で目盛を打つ時点、unit：時点間の単位）
+plot.spectrum <- function(dat, lab = "", main = "",
+                          y_max = 1, tick = c(8, 4), unit = 1){
+  # データの周波数領域変換
+  dat_FFT <- abs(fft(as.vector(dat)))
+
+  # グラフ横軸（周波数）の表示に関する準備
+  data_len  <- length(dat_FFT)
+  freq_tick <- c(data_len, tick, 2)
+
+  # 周波数領域でのデータをプロット
+  plot(dat_FFT/max(dat_FFT), type = "l", main = main,
+       ylab = "|規格化後の周波数スペクトル|", ylim = c(0, y_max),
+       xlab = sprintf("周波数[1/%s]", lab), xlim = c(1, data_len/2), xaxt = "n")
+  axis(side = 1, at = data_len/freq_tick * unit + 1, 
+       labels = sprintf("1/%d", freq_tick), cex.axis = 0.7)
+}
+
+
+# 描画に関する前処理（グラフのデフォルト設定を保存してから、これを変更する）
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2)); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 3, 1))
+
+# (a) ナイル川における年間流量
+plot.spectrum(       Nile, lab =   "年", main = "(a)")
+
+# (b) 大気中の二酸化炭素濃度
+plot.spectrum(      y_CO2, lab =   "月", main = "(b)", tick = c(12, 6))
+
+# (c) 英国における四半期毎のガス消費量
+plot.spectrum(  UKgas_log, lab =   "月", main = "(c)", tick = c(12, 6), unit = 3)
+
+# (d) 非線形なモデルから生成した人工的なデータ
+plot.spectrum(y_nonlinear, lab = "時点", main = "(d)")
+
+# 以降のコードは表示を省略
+
+# 縦軸のスケールを変えて再描画
+
+# (a) ナイル川における年間流量
+plot.spectrum(       Nile, lab =   "年", main = "(a)", y_max = 0.02)
+
+# (b) 大気中の二酸化炭素濃度
+plot.spectrum(      y_CO2, lab =   "月", main = "(b)", y_max = 0.02,
+              tick = c(12, 6))
+
+# (c) 英国における四半期毎のガス消費量
+plot.spectrum(  UKgas_log, lab =   "月", main = "(c)", y_max = 0.2 ,
+              tick = c(12, 6), unit = 3)
+
+# (d) 非線形なモデルから生成した人工的なデータ
+plot.spectrum(y_nonlinear, lab = "時点", main = "(d)", y_max = 0.2 )
+
+# 描画に関する後処理
+par(oldpar)
+```
+
+
+
+##モデルの定義
+
+```{r 図4.10, echo = FALSE, results='hide'}
+#【時系列データの成分分解と残差】
+
+# 前処理
+set.seed(1234)
+oldpar <- par(no.readonly = TRUE)
+par(cex.lab = 1.0)
+par(mfrow = c(4, 3)); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 2, 1))
+
+# 横軸の刻みと雑音
+x_tick <- seq(from = 0, to = 2*pi*5, length = 100)
+noise <- rnorm(n = 100) / 3
+
+# レベル成分
+plot.new()  # ダミーパネル
+plot(x = x_tick, y = rep(10, 100),
+     type = "l", bty = "l", xaxs = "r", yaxs = "i", xaxt = "n", yaxt = "n", ann = F)
+mtext(text = "レベル成分", side = 1, line = 1.5)
+mtext(text = "時間", side = 1, at = 10*pi, line = 0.3, cex = 0.7)
+plot.new()  # ダミーパネル
+
+# 傾き成分
+plot.new()  # ダミーパネル
+plot(x = x_tick, y = x_tick/10, ylim = c(0, 10),
+     type = "l", bty = "l", xaxs = "i", yaxs = "i", xaxt = "n", yaxt = "n", ann = F)
+mtext(text = "傾き成分", side = 1, line = 1.5)
+mtext(text = "時間", side = 1, at = 10*pi, line = 0.3, cex = 0.7)
+plot.new()  # ダミーパネル
+
+# 周期成分
+plot.new()  # ダミーパネル
+plot(x = x_tick, y = sin(x_tick),
+     type = "l", bty = "l", xaxs = "r", yaxs = "r", xaxt = "n", yaxt = "n", ann = F)
+mtext(text = "周期成分", side = 1, line = 1.5)
+mtext(text = "時間", side = 1, at = 10*pi, line = 0.3, cex = 0.7)
+plot.new()  # ダミーパネル
+
+# 時系列データ
+plot(x = x_tick, y = 10 + x_tick/10 + sin(x_tick) + noise, ylim = c(5, 14),
+     type = "l", bty = "l", xaxs = "r", yaxs = "i", xaxt = "n", yaxt = "n", ann = F)
+mtext(text = "時系列データ", side = 1, line = 1.5)
+mtext(text = "時間", side = 1, at = 10*pi, line = 0.3, cex = 0.7)
+
+# 推定値
+plot(x = x_tick, y = 10 + x_tick/10 + sin(x_tick), ylim = c(5, 14),
+     type = "l", bty = "l", xaxs = "r", yaxs = "i", xaxt = "n", yaxt = "n", ann = F)
+mtext(text = "推定値", side = 1, line = 1.5)
+mtext(text = "時間", side = 1, at = 10*pi, line = 0.3, cex = 0.7)
+
+# 残差
+plot(x = x_tick, y = noise, ylim = c(-3, 3),
+     type = "l", bty = "n", xaxs = "i", yaxs = "i", xaxt = "n", yaxt = "n", ann = F)
+abline(v = 0, h = 0)
+mtext(text = "残差", side = 1, line = 1.5)
+mtext(text = "時間", side = 1, at = 10*pi, line = -1, cex = 0.7)
+
+# 後処理
+par(oldpar)
+```
+
+
+##パラメータ値の特定
+
+##フィルタリング・予測・平滑化の実行
+
+
+
+```{r コード4.6, collapse=TRUE}
+#【ホルト・ウィンタース法】
+
+# (a) ナイル川における年間流量
+HW_Nile <- HoltWinters(Nile, beta = FALSE, gamma = FALSE)
+str(HW_Nile)
+
+# (b) 大気中の二酸化炭素濃度
+HW_CO2 <- HoltWinters(y_CO2)
+
+# (c) 英国における四半期毎のガス消費量
+HW_UKgas_log <- HoltWinters(UKgas_log)
+
+# (d) 非線形なモデルから生成した人工的なデータ
+HW_nonlinear <- HoltWinters(y_nonlinear, gamma = FALSE)
+
+# フィルタリング値の描画
+
+# 描画に関する前処理（グラフのデフォルト設定を保存してから、これを変更する）
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2)); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 3, 1))
+mygray <- "#80808080"
+
+plot(HW_Nile     , main = "(a)",
+     col = mygray, col.predicted = "black", lty.predicted = "dashed")
+plot(HW_CO2      , main = "(b)",
+     col = mygray, col.predicted = "black", lty.predicted = "dashed")
+plot(HW_UKgas_log, main = "(c)",
+     col = mygray, col.predicted = "black", lty.predicted = "dashed")
+plot(HW_nonlinear, main = "(d)",
+     col = mygray, col.predicted = "black", lty.predicted = "dashed")
+
+# 描画に関する後処理
+par(oldpar)
+```
+
+
+```{r コード4.7, collapse=TRUE}
+#【ホルト・ウィンタース法（成分ごと）】
+
+# (a) ナイル川における年間流量
+HW_out <- HW_Nile
+HW_decomp <- ts.union(y = HW_out$x,
+                  Level = HW_out$fitted[,  "level"], 
+              Resisuals = residuals(HW_out))
+plot(HW_decomp, main = "")
+
+# (b) 大気中の二酸化炭素濃度
+HW_out <- HW_CO2
+HW_decomp <- ts.union(y = HW_out$x,
+                  Level = HW_out$fitted[,  "level"] + HW_out$fitted[, "trend"], 
+                 Season = HW_out$fitted[, "season"],
+              Resisuals = residuals(HW_out))
+plot(HW_decomp, main = "")
+
+# (c) 英国における四半期毎のガス消費量
+HW_out <- HW_UKgas_log
+HW_decomp <- ts.union(y = HW_out$x,
+                  Level = HW_out$fitted[,  "level"] + HW_out$fitted[, "trend"], 
+                 Season = HW_out$fitted[, "season"],
+              Resisuals = residuals(HW_out))
+plot(HW_decomp, main = "")
+
+# (d) 非線形なモデルから生成した人工的なデータ
+HW_out <- HW_nonlinear
+HW_decomp <- ts.union(y = HW_out$x,
+                  Level = HW_out$fitted[,  "level"] + HW_out$fitted[, "trend"], 
+              Resisuals = residuals(HW_out))
+plot(HW_decomp, main = "")
+```
+
+
+```{r コード4.8, collapse=TRUE}
+#【ホルト・ウィンタース法（予測）】
+
+# (b) 大気中の二酸化炭素濃度
+HW_predict <- predict(HW_CO2, n.ahead = 12)
+str(HW_predict)
+
+# 観測値・フィルタリング値と予測値をあわせて描画
+plot(HW_CO2, HW_predict, main = "ホルト・ウィンタース法によるフィルタリングと予測",
+     col = mygray, col.predicted = "black", lty.predicted = "dashed")
+
+# 2015年の観測値も描画
+y_CO2_2015 <- window(y_all, start = 2015)
+lines(y_CO2_2015, col = mygray)
+```
+
+
+
+##結果の確認と吟味
+
+```{r コード4.9, collapse=TRUE}
+#【結果の確認と吟味（残差の自己相関）】
+
+# 描画に関する前処理（グラフのデフォルト設定を保存してから、これを変更する）
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(2, 2)); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 3, 1))
+
+acf(residuals(HW_Nile)     , main = "(a)")
+acf(residuals(HW_CO2)      , main = "(b)")
+acf(residuals(HW_UKgas_log), main = "(c)")
+acf(residuals(HW_nonlinear), main = "(d)")
+
+# 描画に関する後処理
+par(oldpar)
+```
+
+
+```{r コード4.10, collapse=TRUE}
+#【結果の確認と吟味（予測性能）】
+
+# 平均絶対誤差率（Mean Absolute Percentage Error; MAPE）を求めるユーザ定義関数
+MAPE <- function(true, pred){
+  mean(abs(pred - true) / true)
+}
+
+# 予測値の平均絶対偏差率
+MAPE(true = y_CO2_2015, pred = HW_predict)
+```
+
+
+
+
+
+
+
+
+
+
+```{r plotをpdf化する際の終了処理, echo = FALSE, include = FALSE}
+#【plotをpdf化する際の終了処理】
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext.end()
+
+  dev.off()
+}
+```

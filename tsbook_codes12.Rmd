@@ -1,0 +1,918 @@
+---
+title: "コード"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=11]
+---
+
+
+```{r Setup用, echo = FALSE, include = FALSE}
+# 作業ディレクトリ・・・お好みの場所をご設定ください
+setwd("C:/cygwin/home/NOC/book/doc")
+
+# コンソール出力の文字幅
+options(width = 84)
+
+# plot関連の設定
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # PDFファイルに出力する場合
+  pdf(height = 7 / (4/3))
+
+  # フォント情報はラスタライズする
+  require(showtext)
+  font.add("meiryo", "meiryo.ttc")
+  par(family = "meiryo")
+  showtext.begin()
+}
+```
+
+
+#一般状態空間モデルにおける応用的な分析例
+
+
+```{r 便利な関数類の事前ロード, collapse=TRUE, include = FALSE}
+#【ユーティリティ関数と自作関数の事前ロード】
+
+# quantile function for weighted particle clouds
+weighted.quantile <- function(x, w, probs)
+{
+  ## Make sure 'w' is a probability vector
+  if ((s <- sum(w)) != 1)
+    w <- w / s
+  ## Sort 'x' values
+  ord <- order(x)
+  x <- x[ord]
+  w <- w[ord]
+  ## Evaluate cdf
+  W <- cumsum(w)
+  ## Invert cdf
+  tmp <- outer(probs, W, "<=")
+  n <- length(x)
+  quantInd <- apply(tmp, 1, function(x) (1 : n)[x][1])
+  ## Return
+  ret <- x[quantInd]
+  ret[is.na(ret)] <- x[n]
+  return(ret)
+}
+
+# 未来の情報を考慮してフィルタリング粒子を再選択する指標を求めるユーザ定義関数
+smoothing_index <- function(t_current){
+  # 現時点：t_currentにおけるインデックス列
+  index <- 1:N
+
+  # t_current+1〜t_maxに対し、仮想的にリサンプリングを繰り返す
+  for (t in (t_current+1):t_max){     # 上限を限定すれば固定ラグ平滑化になる
+    index <- index[k[, t]]
+  }
+
+  # 仮想的にリサンプリングを繰り返して得られた、最終的な再選択指標を返す
+  return(index)
+}
+
+# 線形領域での規格化（入力：規格化前の対数値ベクトル、戻り値：規格化後の対数値ベクトル）
+normalize <- function(l){
+  # 入力の対数値ベクトルが最大値を取る番号
+  max_ind <- which.max(l)
+
+  # スケーリングを施すことでアンダーフローを極力抑止
+  return(
+    l - l[max_ind] -
+    log1p(sum(exp(l[-max_ind] - l[max_ind])))
+  )
+}
+
+# 系統リサンプリングを行うユーザ定義関数（N：粒子数、w：規格化済みの対数重みベクトル）
+sys_resampling <- function(N, w){
+  # wを線形領域に戻す
+  w <- exp(w)
+  
+  # 重みの経験分布に応じて粒子番号を返す階段関数を規定（yはxより1つ多い）
+  sfun <- stepfun(x = cumsum(w), y = 1:(N+1)) 
+
+  # 等間隔でサンプリング（分位点全体に対してrunif()でオフセットをかける）
+  sfun((1:N - runif(n = 1)) / N)
+}
+
+# パラメータに対する人為的な移動平均を実行するユーザ定義関数
+kernel_smoothing <- function(realization, w, a){
+  # wを線形領域に戻す
+  w <- exp(w)
+  
+  # 重み付き平均と重み付き分散
+  mean_realization  <- weighted.mean( realization                      , w)
+   var_realization  <- weighted.mean((realization - mean_realization)^2, w)
+
+  # 人為的な移動平均による、平均と分散減少分
+      mu <- a * realization + (1 - a) * mean_realization
+  sigma2 <- (1 - a^2) * var_realization
+
+  return(list(mu = mu, sigma = sqrt(sigma2)))
+}
+
+# 1時点分のカルマンフィルタリングを行うユーザ定義関数
+Kalman_filtering <- function(y, state, param){
+  # 一旦全粒子分の結果を求める（粒子数Nには親環境の値が適用される）
+  res <- sapply(1:N, function(n){
+    # モデルの設定：親環境に存在するmodがベース分として自動的にコピーされる
+    mod$m0 <-     state$m0[n]
+    mod$C0 <-     state$C0[n]
+    mod$W  <- exp(param$ W[n])    # Wは対数領域の値
+    mod$V  <- exp(param$ V[n])    # Vは対数領域の値
+
+    # 1時点分のカルマンフィルタリングを実行
+    KF_out <- dlmFilter(y = y, mod = mod)
+
+    # 必要な値をまとめる
+    return(
+      c(
+        # 状態（フィルタリング分布の平均と分散）の導出のため
+        m = KF_out$m[2],                              # 状態における1は事前分布
+        C = dlmSvd2var(KF_out$U.C, KF_out$D.C)[[2]],  # 状態における1は事前分布
+
+        # 一期先予測尤度の算出のため
+        f = KF_out$f,
+        Q = mod$FF %*% dlmSvd2var(KF_out$U.R, KF_out$D.R)[[1]] %*% t(mod$FF) +
+            mod$V
+      )
+    )
+  })
+
+  # 扱いやすいようにリストにまとめる
+  return(list(m = res["m", ], C = res["C", ], f = res["f", ], Q = res["Q", ]))
+}
+```
+
+
+
+##構造変化の考慮
+
+```{r 図12.1, echo = FALSE, results='hide'}
+#【ナイル川の流量データ（再掲）】
+
+plot(Nile)
+```
+
+
+##カルマンフィルタによるアプローチ(変化点は既知)
+
+###これまでに検討した時不変のモデル
+
+```{r 図12.2, echo = FALSE, results='hide'}
+#【ナイル川の流量データにローカルレベルモデルを適用（時不変カルマンフィルタ）】
+
+# 前処理
+set.seed(123)
+library(dlm)
+
+# ナイル川の流量データ
+y <- Nile
+t_max <- length(y)
+
+# ローカルレベルモデルを構築する関数（状態雑音の分散が時不変）
+build_dlm <- function(par){
+  dlmModPoly(order = 1, dV = exp(par[1]), dW = exp(par[2]))
+}
+
+# パラメータの最尤推定
+fit_dlm <- dlmMLE(y = y, parm = rep(0, 2), build = build_dlm)
+mod <- build_dlm(fit_dlm$par)
+cat(mod$W, mod$V, "\n")
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# 平滑化分布の平均
+s <- dropFirst(dlmSmoothed_obj$s)
+
+# プロット
+ts.plot(cbind(y, s),
+        lty=c("solid", "solid"),
+        col=c("lightgray", "black"))
+
+# 凡例
+legend(legend = c("観測値", "平均 （時不変カルマン平滑化)"),
+       lty = c("solid", "solid"),
+       col = c("lightgray", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+###線形・ガウス型状態空間モデルにおいて先見情報を活用する
+
+###数値結果
+
+
+```{r コード12.1, collapse=TRUE}
+#【ナイル川の流量データにローカルレベルモデルを適用（時変カルマンフィルタ）】
+
+# 前処理
+set.seed(123)
+library(dlm)
+
+# ナイル川の流量データ
+y <- Nile
+t_max <- length(y)
+
+# ローカルレベルモデルを構築する関数（状態雑音の分散が時変）
+build_dlm <- function(par) {
+  tmp <- dlmModPoly(order = 1, dV = exp(par[1]))
+
+  # 状態雑音の分散はXの1列目を参照する
+  tmp$JW <- matrix(1, nrow = 1, ncol = 1)
+
+  # Xの1列目に状態雑音の分散を格納する
+  tmp$X <- matrix(exp(par[2]), nrow = t_max, ncol = 1)
+
+  # 1899年の状態雑音のみ増加を許容
+  j <- which(time(y) == 1899)
+  tmp$X[j, 1] <- tmp$X[j, 1] * exp(par[3])
+
+  return(tmp)
+}
+
+# パラメータの最尤推定
+fit_dlm <- dlmMLE(y = y, parm = rep(0, 3), build = build_dlm)
+modtv <- build_dlm(fit_dlm$par)
+as.vector(modtv$X); modtv$V
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = modtv)
+
+# 平滑化分布の平均
+stv <- dropFirst(dlmSmoothed_obj$s)
+
+# プロット
+ts.plot(cbind(y, stv),
+        lty=c("solid", "solid"),
+        col=c("lightgray", "black"))
+
+# 凡例
+legend(legend = c("観測値", "平均 （時変カルマン平滑化)"),
+       lty = c("solid", "solid"),
+       col = c("lightgray", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+
+##MCMCを活用した解法によるアプローチ(変化点は未知)
+
+###これまでに検討した時不変のモデル
+
+
+```{r 図12.4, echo = FALSE, results='hide'}
+#【ナイル川の流量データにローカルレベルモデルを適用（時不変MCMC）】
+
+# 前処理
+set.seed(123)
+library(rstan)
+
+# Stanの事前設定：コードのHDD保存、並列演算、グラフの縦横比
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+theme_set(theme_get() + theme(aspect.ratio = 3/4))
+
+# モデル：生成・コンパイル
+stan_mod_out <- stan_model(file = "model10-3.stan")
+
+# 平滑化：実行（サンプリング）
+dim(mod$m0) <- 1               # ベクトル要素が1つの場合は、明示的に次元を設定
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = matrix(y, nrow = 1),
+                                 G = mod$G, F = t(mod$F),
+                                 m0 = mod$m0, C0 = mod$C0),
+                     pars = c("W", "V"),
+                     seed = 123
+            )
+
+# 結果の確認
+oldpar <- par(no.readonly = TRUE); options(max.print = 99999)
+fit_stan
+options(oldpar)
+#traceplot(fit_stan, pars = c("W", "V"), alpha = 0.5)
+
+# カルマンフィルタのモデルをコピーして修正
+mod_MCMC <- mod
+mod_MCMC$W[1, 1] <- summary(fit_stan)$summary["W[1,1]", "mean"]
+mod_MCMC$V[1, 1] <- summary(fit_stan)$summary["V[1,1]", "mean"]
+cat(mod_MCMC$W, mod_MCMC$V, "\n")
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod_MCMC)
+
+# 平滑化分布の平均
+s_MCMC <- dropFirst(dlmSmoothed_obj$s)
+
+# プロット
+ts.plot(cbind(y, s_MCMC, s),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"))
+
+# 凡例
+legend(legend = c("観測値", "平均（時不変MCMC)", "平均（時不変カルマン平滑化）"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", cex = 0.7)
+```
+
+
+
+###一般状態空間モデルにおいて馬蹄分布を活用する
+
+
+```{r 図12.5, echo = FALSE, results='hide'}
+#【馬蹄分布の頻度】
+
+set.seed(123)
+
+dLaplace <- function(x){ 1/2 * exp(-abs(x)) }
+
+sample_size <- 1e+5
+lambda <- abs(rcauchy(sample_size, location = 0, scale = 1))
+horseshoe <- rnorm(sample_size, sd = lambda * 1)
+
+breaks <- function(samples){
+  return(c(
+    c(min(samples), -3), seq(from = -3, to = 3, by = 0.1), c(3, max(samples))
+  ))
+}
+xlim <- c(-3, 3); ylim <- c(0, 0.6)
+
+#curve(dnorm(x),
+#      xlim = xlim, ylim = ylim, xaxs = "i", yaxs = "i",
+#      xlab = "実現値", ylab = "密度")
+curve(dcauchy(x),
+      xlim = xlim, ylim = ylim, xaxs = "i", yaxs = "i",
+      xlab = "実現値", ylab = "密度", lty = "solid")
+curve(dLaplace(x), add = TRUE,
+      xlim = xlim, ylim = ylim, xaxs = "i", yaxs = "i", xlab = "", ylab = "",
+      lty = "dashed")
+hist(horseshoe, breaks = breaks(horseshoe), add = TRUE,
+     xlim = xlim, ylim = ylim, xaxs = "i", yaxs = "i", xlab = "", ylab = "",
+     col = "#80808040", border = "#80808040")
+
+legend(legend = c("コーシー分布", "ラプラス分布", "馬蹄分布"),
+       col = c("black", "black", "lightgray"),
+       lty = c("solid", "dashed", "solid"),
+       lwd = c(1, 1, 5),
+       x = "topright", cex = 0.7)
+```
+
+
+
+###数値結果
+
+
+
+```{r コード12.3, collapse=TRUE}
+#【ナイル川の流量データにローカルレベルモデルを適用（時変MCMC：馬蹄分布）】
+
+# 前処理
+set.seed(123)
+library(rstan)
+
+# Stanの事前設定：コードのHDD保存、並列演算、グラフの縦横比
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+theme_set(theme_get() + theme(aspect.ratio = 3/4))
+
+# モデル：生成・コンパイル
+stan_mod_out <- stan_model(file = "model12-1.stan")
+
+# 平滑化：実行（サンプリング）
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = y, 
+                                 miss = as.integer(is.na(y)),
+                                 m0 = modtv$m0, C0 = modtv$C0[1, 1]),
+                     pars = c("lambda", "W_sqrt", "V_sqrt"),
+                     seed = 123
+            )
+
+# 結果の確認
+oldpar <- par(no.readonly = TRUE); options(max.print = 99999)
+print(fit_stan, probs = c(0.025, 0.5, 0.975))
+options(oldpar)
+traceplot(fit_stan, pars = c("W_sqrt", "V_sqrt"), alpha = 0.5)
+
+# カルマンフィルタのモデルをコピーして修正
+modtv_MCMC <- modtv
+modtv_MCMC$X[ , 1] <- (summary(fit_stan)$summary[   1:100, "mean"] *
+                       summary(fit_stan)$summary["W_sqrt", "mean"])^2
+modtv_MCMC$V[1, 1] <- (summary(fit_stan)$summary["V_sqrt", "mean"])^2
+as.vector(modtv_MCMC$X); modtv_MCMC$V
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = modtv_MCMC)
+
+# 平滑化分布の平均
+stv_MCMC <- dropFirst(dlmSmoothed_obj$s)
+
+# プロット
+ts.plot(cbind(y, stv_MCMC, stv),
+        lty=c("solid", "solid", "dashed"),
+        col=c("lightgray", "blue", "red"))
+
+# 凡例
+legend(legend = c("観測値", "平均（時変MCMC：馬蹄分布)", "平均（時変カルマン平滑化）"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", cex = 0.7)
+```
+
+
+
+##粒子フィルタによるアプローチ(変化点は未知)
+
+###これまでに検討した時不変のモデル
+
+```{r 図12.8&9, echo = FALSE, results='hide'}
+#【ナイル川の流量データにローカルレベルモデルを適用（時不変粒子フィルタ）】
+
+# 前処理
+set.seed(123)
+
+# 粒子フィルタの事前設定
+N <- 1000                      # 粒子数
+a <- 0.975                    # パラメータの人為的な移動平均における指数加重
+W_max <- 10 * var(diff(y))    # パラメータWに関する最大値の見積もり
+V_max <- 10 * var(     y )    # パラメータVに関する最大値の見積もり
+
+# ※注意：事前分布を時点1とし、本来の時点1~t_maxを+1シフトして2~t_max+1として扱う
+
+# データの整形(事前分布に相当するダミー分(先頭)を追加)
+y <- c(NA_real_, y)
+
+# 事前分布の設定
+
+# 粒子（実現値）：状態雑音の分散の時不変分（対数領域）
+W      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+W[1, ] <- log(runif(N, min = 0, max = W_max))         # 対数領域
+
+# 粒子（実現値）：パラメータV（対数領域）
+V      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+V[1, ] <- log(runif(N, min = 0, max = V_max))         # 対数領域
+
+# 粒子（実現値）：状態（フィルタリング分布の平均と分散）
+m <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+m[1, ] <- mod$m0                                      # 事前分布のパラメータ未知
+C <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+C[1, ] <- mod$C0                                      # 事前分布のパラメータ未知
+
+# 粒子（重み）
+w <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+w[1, ] <- log(1 / N)
+
+# 進捗バーの設定
+progress_bar <- txtProgressBar(min = 2, max = t_max+1, style = 3)
+
+# 時間順方向の処理：カーネル平滑化＋補助粒子フィルタ＋ラオ-ブラックウェル化
+for (t in (1:t_max)+1){
+  # 進捗バーの表示
+  setTxtProgressBar(pb = progress_bar, value = t)
+
+  # パラメータに対する人為的な移動平均
+  W_ks <- kernel_smoothing(realization = W[t-1, ], w = w[t-1, ], a = a)
+  V_ks <- kernel_smoothing(realization = V[t-1, ], w = w[t-1, ], a = a)
+
+  # リサンプリング（相当）
+
+  # 1時点分のカルマンフィルタリング->補助変数列
+  KF_aux <- Kalman_filtering(y = y[t],
+                             state = list(m0 = m[t-1, ], C0 = C[t-1, ]),
+                             param = list(W = W_ks$mu, V = V_ks$mu)
+            )
+  probs <- w[t-1, ] + dnorm(y[t], mean = KF_aux$f, sd = sqrt(KF_aux$Q), log = TRUE)
+  k <- sys_resampling(N = N, w = normalize(probs))
+  
+  # 連続値を持つ提案分布からパラメータの実現値を抽出（リフレッシュ）
+  W[t, ] <- rnorm(N, mean = W_ks$mu[k], sd = W_ks$sigma)
+  V[t, ] <- rnorm(N, mean = V_ks$mu[k], sd = V_ks$sigma)
+
+  # 状態：1時点分のカルマンフィルタリング->粒子（実現値）の導出
+  KF <- Kalman_filtering(y = y[t],
+                         state = list(m0 = m[t-1, k], C0 = C[t-1, k]),
+                         param = list(W = W[t, ], V = V[t, ])
+        )
+  m[t, ] <- KF$m
+  C[t, ] <- KF$C
+
+  # 粒子（重み）を更新
+  w[t, ] <- dnorm(y[t], mean = KF$f       , sd = sqrt(KF$Q)       , log = TRUE) -
+            dnorm(y[t], mean = KF_aux$f[k], sd = sqrt(KF_aux$Q[k]), log = TRUE)
+
+  # 重みの規格化
+  w[t, ] <- normalize(w[t, ])
+}
+
+# 結果の整形：事前分布の分（先頭）を除去等
+      y <- ts(y[-1])
+      W <- W[-1, , drop = FALSE]
+      V <- V[-1, , drop = FALSE]
+      m <- m[-1, , drop = FALSE]
+      C <- C[-1, , drop = FALSE]
+      w <- w[-1, , drop = FALSE]
+
+# 平均・25%値・75%値を求める
+LWF_W_m     <- sapply(1:t_max, function(t){exp(        # 線形領域に戻す
+                 weighted.mean(W[t, ], w = exp(w[t, ]))
+               )})
+LWF_W_quant <- lapply(c(0.25, 0.75), function(quant){
+                 sapply(1:t_max, function(t){exp(      # 線形領域に戻す
+                   weighted.quantile(W[t, ], w = exp(w[t, ]), probs = quant)
+                 )})
+               })
+LWF_V_m     <- sapply(1:t_max, function(t){exp(        # 線形領域に戻す
+                 weighted.mean(V[t, ], w = exp(w[t, ]))
+               )})
+LWF_V_quant <- lapply(c(0.25, 0.75), function(quant){
+                 sapply(1:t_max, function(t){exp(      # 線形領域に戻す
+                   weighted.quantile(V[t, ], w = exp(w[t, ]), probs = quant)
+                 )})
+               })
+
+# ts型に変換
+tsp(y) <- tsp(Nile)
+LWF_W_m <- ts(LWF_W_m); tsp(LWF_W_m) <- tsp(y)
+LWF_V_m <- ts(LWF_V_m); tsp(LWF_V_m) <- tsp(y)
+LWF_W_quant <- lapply(LWF_W_quant, function(x){
+                 tmp <- ts(x); tsp(tmp) <- tsp(y); return(tmp)
+               })
+LWF_V_quant <- lapply(LWF_V_quant, function(x){
+                 tmp <- ts(x); tsp(tmp) <- tsp(y); return(tmp)
+               })
+
+# 結果のプロット
+ts.plot(cbind(LWF_W_m, do.call("cbind", LWF_W_quant)),
+        lty=c("solid", "dashed", "dashed"), ylab = "W", ylim = c(0, 2e+4))
+
+# 凡例
+legend(legend = c("平均値", "50%区間"),
+       col = c("black", "black"),
+       lty = c("solid", "dashed"),
+       x = "topright", cex = 1.0)
+
+# 結果のプロット
+ts.plot(cbind(LWF_V_m, do.call("cbind", LWF_V_quant)),
+        lty=c("solid", "dashed", "dashed"), ylab = "V", ylim = c(0, 1e+5))
+
+# 凡例
+legend(legend = c("平均値", "50%区間"),
+       col = c("black", "black"),
+       lty = c("solid", "dashed"),
+       x = "topright", cex = 1.0)
+
+# カルマンフィルタのモデルをコピーして修正
+mod_PF <- mod
+mod_PF$W[ , 1]  <- LWF_W_m[t_max]
+mod_PF$V[1, 1]  <- LWF_V_m[t_max]
+cat(mod_PF$W, mod_PF$V, "\n")
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod_PF)
+
+# 平滑化分布の平均
+s_PF <- dropFirst(dlmSmoothed_obj$s)
+
+# プロット
+ts.plot(cbind(y, s_PF, s),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"))
+
+# 凡例
+legend(legend = c("観測値", "平均（時不変粒子フィルタ)", "平均（時不変カルマン平滑化）"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", cex = 0.7)
+```
+
+
+###一般状態空間モデルにおいて馬蹄分布を活用する
+
+###数値結果
+
+
+```{r コード12.4, collapse=TRUE}
+#【ナイル川の流量データにローカルレベルモデルを適用（時変粒子フィルタ：馬蹄分布）】
+
+# 前処理
+set.seed(123)
+
+# 粒子フィルタの事前設定
+N <- 10000                    # 粒子数
+a <- 0.975                    # パラメータの人為的な移動平均における指数加重
+W_max <- 10 * var(diff(y))    # パラメータWに関する最大値の見積もり
+V_max <- 10 * var(     y )    # パラメータVに関する最大値の見積もり
+
+# ※注意：事前分布を時点1とし、本来の時点1~t_maxを+1シフトして2~t_max+1として扱う
+
+# データの整形(事前分布に相当するダミー分(先頭)を追加)
+y <- c(NA_real_, y)
+
+# リサンプリング用のインデックス列を全時点で保存しておく
+k_save <- matrix(1:N, nrow = N, ncol = t_max+1)  
+
+# 事前分布の設定
+
+# 粒子（実現値）：状態雑音の分散（時変の倍率）
+lambda2      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+lambda2[1, ] <- log(rcauchy(N)^2)                       # 対数領域、実質推定に影響無し
+
+# 粒子（実現値）：状態雑音の分散（時不変のベース）
+W      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+W[1, ] <- log(runif(N, min = 0, max = W_max))           # 対数領域
+
+# 粒子（実現値）：パラメータV（時不変）
+V      <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+V[1, ] <- log(runif(N, min = 0, max = V_max))           # 対数領域
+
+# 粒子（実現値）：状態（フィルタリング分布の平均と分散）
+m <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+m[1, ] <- modtv$m0                                      # 事前分布のパラメータ未知
+C <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+C[1, ] <- modtv$C0                                      # 事前分布のパラメータ未知
+
+# 粒子（重み）
+w <- matrix(NA_real_, nrow = t_max+1, ncol = N)
+w[1, ] <- log(1 / N)
+
+# 進捗バーの設定
+progress_bar <- txtProgressBar(min = 2, max = t_max+1, style = 3)
+
+# 時間順方向の処理：カーネル平滑化＋補助粒子フィルタ＋ラオ-ブラックウェル化
+for (t in (1:t_max)+1){
+  # 進捗バーの表示
+  setTxtProgressBar(pb = progress_bar, value = t)
+
+  # パラメータに対する人為的な移動平均
+  W_ks <- kernel_smoothing(realization = W[t-1, ], w = w[t-1, ], a = a)
+  V_ks <- kernel_smoothing(realization = V[t-1, ], w = w[t-1, ], a = a)
+
+  # リサンプリング（相当）
+
+  # 1時点分のカルマンフィルタリング->補助変数列
+  KF_aux <- Kalman_filtering(y = y[t],
+                             state = list(m0 = m[t-1, ], C0 = C[t-1, ]),
+                             param = list(W = log(1)+W_ks$mu, V = V_ks$mu)
+            )
+  probs <- w[t-1, ] +
+           dnorm(y[t], mean = KF_aux$f, sd = sqrt(KF_aux$Q), log = TRUE)
+  k <- sys_resampling(N = N, w = normalize(probs))
+  k_save[, t] <- k          # 粒子平滑化（北川アルゴリズム）のために全時点分保存
+
+  # 時点毎に全ての標本をリフレッシュ
+  lambda2[t, ] <- log(rcauchy(N)^2)
+
+  # 連続値を持つ提案分布からパラメータの実現値を抽出（リフレッシュ）
+  W[t, ] <- rnorm(N, mean = W_ks$mu[k], sd = W_ks$sigma)
+  V[t, ] <- rnorm(N, mean = V_ks$mu[k], sd = V_ks$sigma)
+
+  # 状態：1時点分のカルマンフィルタリング->粒子（実現値）の導出
+  KF <- Kalman_filtering(y = y[t],
+                         state = list(m0 = m[t-1, k], C0 = C[t-1, k]),
+                         param = list(W = lambda2[t, ]+W[t, ], V = V[t, ])
+        )
+  m[t, ] <- KF$m
+  C[t, ] <- KF$C
+
+  # 粒子（重み）を更新
+  w[t, ] <- dnorm(y[t], mean = KF$f       , sd = sqrt(KF$Q)       , log = T) -
+            dnorm(y[t], mean = KF_aux$f[k], sd = sqrt(KF_aux$Q[k]), log = T)
+
+  # 重みの規格化
+  w[t, ] <- normalize(w[t, ])
+}
+
+# 以降のコードは表示を省略
+
+# 結果の整形：事前分布の分（先頭）を除去等
+      y <- ts(y[-1])
+      k <-  k_save[, -1, drop = FALSE]
+lambda2 <- lambda2[-1, , drop = FALSE]
+      W <-       W[-1, , drop = FALSE]
+      V <-       V[-1, , drop = FALSE]
+      m <-       m[-1, , drop = FALSE]
+      C <-       C[-1, , drop = FALSE]
+      w <-       w[-1, , drop = FALSE]
+
+# 平均・25%値・75%値を求める
+LWF_W_m     <- sapply(1:t_max, function(t){exp(        # 線形領域に戻す
+                 weighted.mean(W[t, ], w = exp(w[t, ]))
+               )})
+LWF_W_quant <- lapply(c(0.25, 0.75), function(quant){
+                 sapply(1:t_max, function(t){exp(      # 線形領域に戻す
+                   weighted.quantile(W[t, ], w = exp(w[t, ]), probs = quant)
+                 )})
+               })
+LWF_V_m     <- sapply(1:t_max, function(t){exp(        # 線形領域に戻す
+                 weighted.mean(V[t, ], w = exp(w[t, ]))
+               )})
+LWF_V_quant <- lapply(c(0.25, 0.75), function(quant){
+                 sapply(1:t_max, function(t){exp(      # 線形領域に戻す
+                   weighted.quantile(V[t, ], w = exp(w[t, ]), probs = quant)
+                 )})
+               })
+
+# ts型に変換
+tsp(y) <- tsp(Nile)
+LWF_W_m <- ts(LWF_W_m); tsp(LWF_W_m) <- tsp(y)
+LWF_V_m <- ts(LWF_V_m); tsp(LWF_V_m) <- tsp(y)
+LWF_W_quant <- lapply(LWF_W_quant, function(x){
+                 tmp <- ts(x); tsp(tmp) <- tsp(y); return(tmp)
+               })
+LWF_V_quant <- lapply(LWF_V_quant, function(x){
+                 tmp <- ts(x); tsp(tmp) <- tsp(y); return(tmp)
+               })
+
+# 結果のプロット
+ts.plot(cbind(LWF_W_m, do.call("cbind", LWF_W_quant)),
+        lty=c("solid", "dashed", "dashed"), ylab = "W", ylim = c(0, 2e+4))
+
+# 凡例
+legend(legend = c("平均値", "50%区間"),
+       col = c("black", "black"),
+       lty = c("solid", "dashed"),
+       x = "topright", cex = 1.0)
+
+# 結果のプロット
+ts.plot(cbind(LWF_V_m, do.call("cbind", LWF_V_quant)),
+        lty=c("solid", "dashed", "dashed"), ylab = "V", ylim = c(0, 1e+5))
+
+# 凡例
+legend(legend = c("平均値", "50%区間"),
+       col = c("black", "black"),
+       lty = c("solid", "dashed"),
+       x = "topright", cex = 1.0)
+
+
+# 未来の情報を考慮してフィルタリング粒子を再選択
+ki <- sapply(1:(t_max-1), function(t){ lambda2[t, smoothing_index(t)] })
+ki <- t(cbind(ki, lambda2[t_max, ]))        # 最終時点での平滑化分布を追加
+
+# 平均・25%値・75%値を求める
+LWF_lambda2_s     <- sapply(1:t_max, function(t){exp(        # 線形領域に戻す
+                       weighted.mean(ki[t, ], w = exp(w[t, ]))
+                     )})
+LWF_lambda2_quant <- lapply(c(0.25, 0.75), function(quant){
+                       sapply(1:t_max, function(t){exp(      # 線形領域に戻す
+                         weighted.quantile(ki[t, ], w = exp(w[t, ]), probs = quant)
+                       )})
+                     })
+
+# ts型に変換
+LWF_lambda2_s <- ts(LWF_lambda2_s); tsp(LWF_lambda2_s) <- tsp(y)
+LWF_lambda2_quant <- lapply(LWF_lambda2_quant, function(x){
+                       tmp <- ts(x); tsp(tmp) <- tsp(y); return(tmp)
+                    })
+
+# 結果のプロット
+ts.plot(cbind(LWF_lambda2_s, do.call("cbind", LWF_lambda2_quant)),
+        ylab = "Wに対する時変の倍率", ylim = c(0, 30),
+        lty = c("solid", "dashed", "dashed"),
+        col = c("black", "gray", "gray"))
+abline(h = 1, col = "lightgray", lty = "solid")
+mtext("1", at = 1, side = 2, cex = 0.6)
+points(1899, LWF_lambda2_s[time(LWF_lambda2_s) == 1899], pch = 1)
+points(1916, LWF_lambda2_s[time(LWF_lambda2_s) == 1916], pch = 1)
+lines(x = c(1899, 1899), y = c(-2, LWF_lambda2_s[time(LWF_lambda2_s) == 1899]),
+      lty = "dotted", col = "lightgray")
+lines(x = c(1916, 1916), y = c(-2, LWF_lambda2_s[time(LWF_lambda2_s) == 1916]),
+      lty = "dotted", col = "lightgray")
+mtext("1899", at = 1899, side = 1, adj = 1  , cex = 0.6)
+mtext("1916", at = 1916, side = 1, adj = 0.5, cex = 0.6)
+
+# 凡例
+legend(legend = c("平均", "50%区間"),
+       col = c("black", "black"),
+       lty = c("solid", "dashed"),
+       x = "topright", cex = 1.0)
+
+
+# カルマンフィルタのモデルをコピーして修正
+modtv_PF <- modtv
+modtv_PF$X[ , 1]  <- LWF_lambda2_s * LWF_W_m[t_max]
+modtv_PF$V[1, 1]  <- LWF_V_m[t_max]
+as.vector(modtv_PF$X); modtv_PF$V
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = modtv_PF)
+
+# 平滑化分布の平均
+stv_PF <- dropFirst(dlmSmoothed_obj$s)
+
+# プロット
+ts.plot(cbind(y, stv_PF, stv),
+        lty=c("solid", "solid", "dashed"),
+        col=c("lightgray", "blue", "red"))
+
+# 凡例
+legend(legend = c("観測値", "平均（時変粒子フィルタ：馬蹄分布)", "平均（時変カルマンフィルタ)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", cex = 0.7)
+```
+
+
+
+
+##未知の変化点を実時間で検出する
+
+
+```{r コード12.5, collapse=TRUE}
+#【粒子フィルタにおける固定ラグ平滑化】
+
+# 未来の情報を考慮してフィルタリング粒子を再選択する指標を求めるユーザ定義関数
+smoothing_index <- function(t_current, lag_val){
+  # 現時点：t_currentにおけるインデックス列
+  index <- 1:N
+
+  # t_current+1〜t_current+lag_valに対し、仮想的にリサンプリングを繰り返す
+  for (t in (t_current+1):ifelse(t_current + lag_val <= t_max,
+                                 t_current + lag_val,   t_max)){
+    index <- index[k[, t]]
+  }
+
+  # 仮想的にリサンプリングを繰り返して得られた、最終的な再選択指標を返す
+  return(index)
+}
+```
+
+
+
+
+```{r 図12.13, echo = FALSE, results='hide'}
+#【ナイル川の流量データにローカルレベルモデルを適用（固定ラグ平滑化の結果比較）】
+
+# フィルタリング
+# 平均を求める
+LWF_lambda2_m <- sapply(1:t_max, function(t){exp(        # 線形領域に戻す
+                   weighted.mean(lambda2[t, ], w = exp(w[t, ]))
+                 )})
+
+# ts型に変換
+LWF_lambda2_m <- ts(LWF_lambda2_m); tsp(LWF_lambda2_m) <- tsp(y)
+
+
+# 固定ラグ平滑化（ラグ = 1, 2, 3）
+LWF_lambda2_s_lag <- lapply(1:3, function(lag){
+  # 未来の情報を考慮してフィルタリング粒子を再選択
+  ki <- sapply(1:(t_max-1), function(t){ lambda2[t, smoothing_index(t, lag_val = lag)] })
+  ki <- t(cbind(ki, lambda2[t_max, ]))        # 最終時点での平滑化分布を追加
+
+  # 平均を求める
+  LWF_lambda2_s <- sapply(1:t_max, function(t){exp(        # 線形領域に戻す
+                     weighted.mean(ki[t, ], w = exp(w[t, ]))
+                   )})
+
+  # ts型に変換
+  LWF_lambda2_s <- ts(LWF_lambda2_s); tsp(LWF_lambda2_s) <- tsp(y)
+
+  # 結果を返す
+  return(LWF_lambda2_s)
+})
+
+# 分析結果の統合
+LWF_lambda2 <-do.call("ts.union", c(list(LWF_lambda2_m), LWF_lambda2_s_lag))
+
+# 結果のプロット
+matplot(LWF_lambda2,
+        xaxt = "n", xlab = "Time", ylab = "Wに対する時変の倍率", ylim = c(0, 14.5),
+        lty = c("dashed", "dashed", "dashed", "dashed"),
+        col = c("gray", "gray", "gray", "black"),
+        type = "o", pch = as.character(0:3), cex = 0.7)
+x_tick <- seq(from = 1, to = nrow(LWF_lambda2), by = 15)
+axis(side = 1, labels = time(LWF_lambda2)[x_tick], at = x_tick)
+mtext("1899", at = which(time(LWF_lambda2) == 1899), side = 1, adj = 1, cex = 0.6)
+abline(h = 1, col = "lightgray", lty = "solid")
+mtext("1", at = 1, side = 2, cex = 0.6)
+
+# 凡例
+legend(legend = c("フィルタリング",
+                  "固定ラグ平滑化（ラグ=1）",
+                  "固定ラグ平滑化（ラグ=2）",
+                  "固定ラグ平滑化（ラグ=3）"),
+       pch = as.character(0:3),
+       lty = c("dashed", "dashed", "dashed", "dashed"),
+       col = c("gray", "gray", "gray", "black"),
+       x = "topleft", cex = 0.6)
+```
+
+
+
+
+
+
+
+
+
+
+```{r plotをpdf化する際の終了処理, echo = FALSE, include = FALSE}
+#【plotをpdf化する際の終了処理】
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext.end()
+
+  dev.off()
+}
+```

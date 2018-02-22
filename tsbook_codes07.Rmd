@@ -1,0 +1,104 @@
+---
+title: "コード"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=6]
+---
+
+
+```{r Setup用, echo = FALSE, include = FALSE}
+# 作業ディレクトリ・・・お好みの場所をご設定ください
+setwd("C:/cygwin/home/NOC/book/doc")
+
+# コンソール出力の文字幅
+options(width = 84)
+
+# plot関連の設定
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # PDFファイルに出力する場合
+  pdf(height = 7 / (4/3))
+
+  # フォント情報はラスタライズする
+  require(showtext)
+  font.add("meiryo", "meiryo.ttc")
+  par(family = "meiryo")
+  showtext.begin()
+}
+```
+
+
+
+#線形・ガウス型状態空間モデルの一括解法
+
+##ウィナーフィルタ
+
+
+
+##例: AR(1)モデルの場合
+
+```{r コード7.1, collapse=TRUE}
+#【AR(1)モデルにおけるウィナー平滑化とカルマン平滑化】
+
+# 前処理
+set.seed(23)
+library(dlm)
+
+# AR(1)を含む状態空間の設定
+W <- 1
+V <- 2
+phi <- 0.98    # AR(1)係数
+mod <- dlmModPoly(order = 1, dW = W, dV = V, C0 = 100)
+mod$GG[1, 1] <- phi
+
+# カルマン予測を活用して観測値を作成
+t_max <- 100
+sim_data <- dlmForecast(mod = mod, nAhead = t_max, sampleNew = 1)
+y <- sim_data$newObs[[1]]
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+s <- dropFirst(dlmSmoothed_obj$s)
+
+# ウィナー平滑化
+# 係数の設定
+r <- V / W
+b <- 1/(r*phi) + 1/phi + phi
+beta <- (b - sqrt(b^2 - 4)) / 2
+
+# 観測値が有限のため、その前後に必要最低限なダミーの0を補てん
+y_expand <- c(rep(0, t_max - 1), y, rep(0, t_max - 1))
+
+# ウィナー平滑化の実行
+d <- (1/phi - beta)*(phi - beta) / (1 - beta^2) *
+     filter(method = "convolution",
+       filter = beta^abs(-(t_max-1):(t_max-1)), x = y_expand
+     )
+
+# 結果からダミー分のNAを除去
+d <- d[!is.na(d)]
+
+# 結果のプロット
+ts.plot(cbind(y, d, s),
+        lty = c("solid", "dashed", "solid"),
+        col = c("lightgray", "red", "blue"),
+        ylab = "")
+# 凡例
+legend(legend = c("観測値", "ウィナー平滑化", "カルマン平滑化"),
+  lty = c("solid", "dashed", "solid"),
+  col = c("lightgray", "red", "blue"),
+  x = "topright", text.width = 17, cex = 0.6)
+```
+
+
+
+```{r plotをpdf化する際の終了処理, echo = FALSE, include = FALSE}
+#【plotをpdf化する際の終了処理】
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext.end()
+
+  dev.off()
+}
+```

@@ -1,0 +1,931 @@
+---
+title: "コード"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=8]
+---
+
+
+```{r Setup用, echo = FALSE, include = FALSE}
+# 作業ディレクトリ・・・お好みの場所をご設定ください
+setwd("C:/cygwin/home/NOC/book/doc")
+
+# コンソール出力の文字幅
+options(width = 84)
+
+# plot関連の設定
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # PDFファイルに出力する場合
+  pdf(height = 7 / (4/3))
+
+  # フォント情報はラスタライズする
+  require(showtext)
+  font.add("meiryo", "meiryo.ttc")
+  par(family = "meiryo")
+  showtext.begin()
+}
+```
+
+
+```{r 便利な関数類の事前ロード, include = FALSE}
+#【自作関数の事前ロード】
+
+# 平均絶対誤差率（Mean Absolute Percentage Error; MAPE）を求めるユーザ定義関数
+MAPE <- function(true, pred){
+  mean(abs((pred - true) / true))
+}
+```
+
+
+#線形・ガウス型状態空間モデルにおける代表的な成分モデルの紹介と分析例
+
+##個別のモデルの組み合わせ
+
+##ローカルレベルモデル
+
+###例: 人工的なローカルレベルモデル
+
+```{r コード9.1, collapse=TRUE}
+#【ローカルレベルモデルに従う人工的なデータの作成】
+
+# 前処理
+set.seed(23)
+library(dlm)
+
+# ローカルレベルモデルの設定
+W <- 1
+V <- 2
+m0 <- 10
+C0 <- 9
+mod <- dlmModPoly(order = 1, dW = W, dV = V, m0 = m0, C0 = C0)
+
+# カルマン予測を活用して観測値を作成
+t_max <- 200
+sim_data <- dlmForecast(mod = mod, nAhead = t_max, sampleNew = 1)
+y <- sim_data$newObs[[1]]
+
+# 結果をts型に変換
+y <- ts(as.vector(y))
+
+# 結果のプロット
+plot(y, ylab = "y")
+```
+
+
+
+```{r 図9.2&3&4, echo = FALSE, results='hide'}
+#【人工的なローカルレベルモデルをカルマンフィルタで分析】
+
+# カルマンフィルタリング
+dlmFiltered_obj <- dlmFilter(y = y, mod = mod)
+
+# フィルタリング分布の平均と標準偏差を求める
+m <- dropFirst(dlmFiltered_obj$m)
+m_sdev <- sqrt(
+            dropFirst(as.numeric(
+              dlmSvd2var(dlmFiltered_obj$U.C, dlmFiltered_obj$D.C)
+            ))
+          )
+
+# フィルタリング分布の50%区間のために、25%値と75%値を求める
+m_quant <- list(m + qnorm(0.25, sd = m_sdev), m + qnorm(0.75, sd = m_sdev))
+
+# 結果のプロット
+ts.plot(cbind(y, m, do.call("cbind", m_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "平均 (フィルタリング分布)", "50%区間 (フィルタリング分布)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+
+# カルマン予測
+dlmForecasted_obj <- dlmForecast(mod = dlmFiltered_obj, nAhead = 10)
+
+# 予測分布の平均と標準偏差を求める
+a <- ts(data = dlmForecasted_obj$a, start = t_max+1)
+a_sdev <- sqrt(
+            as.numeric(
+              dlmForecasted_obj$R
+            )
+          )
+
+# 予測分布の50%区間のために、25%値と75%値を求める
+a_quant <- list(a + qnorm(0.25, sd = a_sdev), a + qnorm(0.75, sd = a_sdev))
+
+# 結果のプロット
+ts.plot(cbind(y, a, do.call("cbind", a_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "平均 (予測分布)", "50%区間 (予測分布)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# 平滑化分布の平均と標準偏差を求める
+s <- dropFirst(dlmSmoothed_obj$s)
+s_sdev <- sqrt(
+            dropFirst(as.numeric(
+              dlmSvd2var(dlmSmoothed_obj$U.S, dlmSmoothed_obj$D.S)
+            ))
+          )
+
+# 平滑化分布の50%区間のために、25%値と75%値を求める
+s_quant <- list(s + qnorm(0.25, sd = s_sdev), s + qnorm(0.75, sd = s_sdev))
+
+# 結果のプロット
+ts.plot(cbind(y, s, do.call("cbind", s_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "平均 (平滑化分布)", "50%区間 (平滑化分布)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+
+# 結果の保存
+save(t_max, y, mod, m, m_quant, a, a_quant, s, s_quant, 
+     file = "ArtifitialLocalLevelModel.RData")
+```
+
+
+##ローカルトレンドモデル
+
+##周期モデル
+
+###時間領域からのアプローチ
+
+###周波数領域からのアプローチ
+
+###例: 大気中の二酸化炭素濃度
+
+####ローカルトレンドモデル+周期モデル(時間領域アプローチ)
+
+```{r コード9.2, collapse=TRUE}
+#【ローカルトレンドモデル+周期モデル(時間領域アプローチ)】
+
+# 前処理
+library(dlm)
+
+# データの読み込み
+Ryori <- read.csv("CO2.csv")
+
+# データをts型に変換し、2014年12月までで打ち切る
+y_all <- ts(data = Ryori$CO2, start = c(1987, 1), frequency = 12)
+y <- window(y_all, end = c(2014, 12))
+
+# モデルの設定：ローカルトレンドモデル+周期モデル(時間領域アプローチ)
+build_dlm_CO2a <- function(par) {
+  return(
+    dlmModPoly(order = 2, dW = exp(par[1:2]), dV = exp(par[3])) +
+    dlmModSeas(frequency = 12, dW = c(exp(par[4]), rep(0, times = 10)), dV = 0)
+  )
+}
+
+# パラメータの最尤推定と結果の確認
+fit_dlm_CO2a <- dlmMLE(y = y, parm = rep(0, 4), build = build_dlm_CO2a)
+fit_dlm_CO2a
+
+# パラメータの最尤推定結果をモデルに指定
+mod  <- build_dlm_CO2a(fit_dlm_CO2a$par)
+
+# カルマンフィルタリング
+dlmFiltered_obj  <- dlmFilter(y = y, mod = mod)
+dlmFiltered_obja <- dlmFiltered_obj              # 後で予測値を比較するために別名で保存
+
+# フィルタリング分布の平均
+   mu <- dropFirst(dlmFiltered_obj$m[, 1])
+gamma <- dropFirst(dlmFiltered_obj$m[, 3])
+
+# 結果のプロット
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "観測値")
+ts.plot(   mu, ylab = "レベル成分", ylim = c(350, 405))
+ts.plot(gamma, ylab = "周期成分"  , ylim = c( -9,   6))
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+
+# 対数尤度の確認
+-dlmLL(y = y, mod = mod)
+```
+
+
+####ローカルレベルモデル+周期モデル(時間領域アプローチ)
+
+```{r コード9.3, collapse=TRUE}
+#【ローカルレベルモデル+周期モデル(時間領域アプローチ)】
+
+# モデルの設定：ローカルレベルモデル+周期モデル(時間領域アプローチ)
+build_dlm_CO2b <- function(par) {
+  return(
+    dlmModPoly(order = 1, dW = exp(par[1]), dV = exp(par[2])) +
+    dlmModSeas(frequency = 12, dW = c(exp(par[3]), rep(0, times = 10)), dV = 0)
+  )
+}
+
+# 以降のコードは表示を省略
+
+# パラメータの最尤推定と結果の確認
+fit_dlm_CO2b <- dlmMLE(y = y, parm = rep(0, 3), build = build_dlm_CO2b)
+fit_dlm_CO2b
+
+# パラメータの最尤推定結果をモデルに指定
+mod  <- build_dlm_CO2b(fit_dlm_CO2b$par)
+
+# カルマンフィルタリング
+dlmFiltered_obj  <- dlmFilter(y = y, mod = mod)
+dlmFiltered_objb <- dlmFiltered_obj              # 後で予測値を比較するために別名で保存
+
+# フィルタリング分布の平均
+   mu <- dropFirst(dlmFiltered_obj$m[, 1])
+gamma <- dropFirst(dlmFiltered_obj$m[, 2])
+
+# 結果のプロット
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "観測値")
+ts.plot(   mu, ylab = "レベル成分", ylim = c(350, 405))
+ts.plot(gamma, ylab = "周期成分"  , ylim = c( -9,   6))
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+
+# 対数尤度の確認
+-dlmLL(y = y, mod = mod)
+```
+
+
+####ローカルトレンドモデル+周期モデル(周波数領域アプローチ)
+
+```{r コード9.4, collapse=TRUE}
+#【ローカルトレンドモデル+周期モデル(周波数領域アプローチ)】
+
+# モデルの設定：ローカルトレンドモデル+周期モデル(周波数領域アプローチ)
+build_dlm_CO2c <- function(par) {
+  return(
+    dlmModPoly(order = 2, dW = exp(par[1:2]), dV = exp(par[3])) +
+    dlmModTrig(s = 12, q = 2, dW = exp(par[4]), dV = 0)
+  )
+}
+
+# 以降のコードは表示を省略
+
+# パラメータの最尤推定と結果の確認
+fit_dlm_CO2c <- dlmMLE(y = y, parm = rep(0, 4), build = build_dlm_CO2c)
+fit_dlm_CO2c
+
+# パラメータの最尤推定結果をモデルに指定
+mod  <- build_dlm_CO2c(fit_dlm_CO2c$par)
+
+# カルマンフィルタリング
+dlmFiltered_obj  <- dlmFilter(y = y, mod = mod)
+dlmFiltered_objc <- dlmFiltered_obj              # 後で予測値を比較するために別名で保存
+
+# フィルタリング分布の平均
+   mu <- dropFirst(dlmFiltered_obj$m[, 1])
+gamma <- dropFirst(dlmFiltered_obj$m[, 3] + dlmFiltered_obj$m[, 5])
+
+# 結果のプロット
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "観測値")
+ts.plot(   mu, ylab = "レベル成分", ylim = c(350, 405))
+ts.plot(gamma, ylab = "周期成分"  , ylim = c( -9,   6))
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+
+# 対数尤度の確認
+-dlmLL(y = y, mod = mod)
+```
+
+
+
+```{r コード9.5, collapse=TRUE}
+#【2015年からの予測】
+
+# カルマン予測
+dlmForecasted_object <- dlmForecast(mod = dlmFiltered_obj, nAhead = 12)
+
+# 予測値の標準偏差・2.5%値・97.5%値を求める
+f_sd <- sqrt(as.numeric(dlmForecasted_object$Q))
+f_lower <- dlmForecasted_object$f + qnorm(0.025, sd = f_sd)
+f_upper <- dlmForecasted_object$f + qnorm(0.975, sd = f_sd)
+
+# 全観測値、予測値の平均値・2.5%値・97.5%値をts型として結合する
+y_union <- ts.union(y_all, dlmForecasted_object$f, f_lower, f_upper)
+
+# 以降のコードは表示を省略
+
+# 結果のプロット
+plot(y_union, plot.type = "single",
+     xlim = c(2010, 2016),
+     ylim = c( 385,  410), ylab = "", 
+     lty = c("solid", "solid", "dashed", "dashed"),
+     col = c("lightgray", "black", "black", "black"))
+
+# 凡例
+legend(legend = c("観測値", "平均 (予測分布)", "95%区間 (予測分布)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topleft", cex = 0.6)
+```
+
+
+
+```{r コード9.6, collapse=TRUE}
+#【2015年からの予測を3つのモデルで比較】
+
+# モデルa, b, cの各々に対して、予測値の平均値・2.5%値・97.5%値を求める
+f_all <- lapply(list(dlmFiltered_obja, dlmFiltered_objb, dlmFiltered_objc),
+                function(x){
+  # カルマン予測
+  dlmForecasted_object <- dlmForecast(mod = x, nAhead = 12)
+
+  # 予測値の標準偏差・2.5%値・97.5%値を求める
+  f_sd <- sqrt(as.numeric(dlmForecasted_object$Q))
+  f_lower <- dlmForecasted_object$f + qnorm(0.025, sd = f_sd)
+  f_upper <- dlmForecasted_object$f + qnorm(0.975, sd = f_sd)
+  
+  # 結果をまとめる
+  return(ts.union(
+     mean = dlmForecasted_object$f,
+    lower = f_lower,
+    upper = f_upper
+  ))
+})
+
+# 各モデルの予測結果をts型として統合する
+names(f_all) <- c("a", "b", "c")
+y_pred <- do.call("ts.union", f_all)
+
+# 全観測値から2015年のデータを切り出す
+y_true <- window(y_all, start = 2015)
+
+# 以降のコードは表示を省略
+
+# 結果のプロット
+plot(y_pred, plot.type = "single", type = "b",
+     xlab = "Time (2015年)", xaxt = "n", ylab = "",
+     pch = c(rep("a", 3), rep("b", 3), rep("c", 3)),
+     lty = rep(c("solid", "dashed", "dashed"), 3),
+     col = rep(c("lightgray", "darkgray", "darkgray"), 3))
+lines(y_true)
+axis(side = 1, at = time(y_true), labels = 1:12)
+
+# 凡例
+legend(legend = c("観測値", "平均 (予測分布)", "95%区間 (予測分布)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("black", "lightgray", "darkgray"),
+       x = "bottomleft", cex = 0.6)
+```
+
+
+
+```{r コード9.7, collapse=TRUE}
+#【2015年からのMAPEを3つのモデルで比較】
+MAPE(true = y_true, pred = y_pred[, "a.mean"])
+MAPE(true = y_true, pred = y_pred[, "b.mean"])
+MAPE(true = y_true, pred = y_pred[, "c.mean"])
+```
+
+
+
+##ARMAモデル
+
+###例: 国産ビールの生産高
+
+```{r コード9.8, collapse=TRUE}
+#【国産ビールの生産高】
+
+# 前処理
+library(dlm)
+
+# データの読み込み
+beer <- read.csv("BEER.csv")
+
+# データをts型に変換
+y <- ts(beer$Shipping_Volume, frequency = 12, start = c(2003, 1))
+
+# プロット
+plot(y)
+
+# データの対数変換
+y <- log(y)
+
+# 対数変換後のデータのプロット
+plot(y, ylab = "log(y)")
+```
+
+
+####ローカルトレンドモデル+周期モデル(時間領域アプローチ)
+
+```{r コード9.9, collapse=TRUE}
+#【国産ビールの生産高：ローカルトレンドモデル+周期モデル(時間領域アプローチ)】
+
+# モデルの設定：ローカルトレンドモデル+周期モデル(時間領域アプローチ)
+build_dlm_BEERa <- function(par){
+  return(
+    dlmModPoly(order = 2, dW = exp(par[1:2]), dV = exp(par[3])) +
+    dlmModSeas(frequency = 12, dW = c(exp(par[4]), rep(0, times = 10)), dV = 0)
+  )
+}
+
+# パラメータの最尤推定と結果の確認
+fit_dlm_BEERa <- dlmMLE(y = y, parm = rep(0, 4), build = build_dlm_BEERa)
+fit_dlm_BEERa
+
+# パラメータの最尤推定結果をモデルに指定
+mod <- build_dlm_BEERa(fit_dlm_BEERa$par)
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# 平滑化分布の平均
+   mu <- dropFirst(dlmSmoothed_obj$s[, 1])
+gamma <- dropFirst(dlmSmoothed_obj$s[, 3])
+
+# 結果のプロット
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "観測値(対数変換後)")
+ts.plot(   mu, ylab = "レベル成分")
+ts.plot(gamma, ylab = "周期成分")
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+
+# 対数尤度の確認
+-dlmLL(y = y, mod = mod)
+```
+
+
+####ローカルレベルモデル+周期モデル(時間領域アプローチ)
+
+```{r コード9.10, collapse=TRUE}
+#【国産ビールの生産高：ローカルレベルモデル+周期モデル(時間領域アプローチ)】
+
+# モデルの設定：ローカルレベルモデル+周期モデル(時間領域アプローチ)
+build_dlm_BEERb <- function(par){
+  return(
+    dlmModPoly(order = 1, dW = exp(par[1]), dV = exp(par[2])) +
+    dlmModSeas(frequency = 12, dW = c(exp(par[3]), rep(0, times = 10)), dV = 0)
+  )
+}
+
+# 以降のコードは表示を省略
+
+# パラメータの最尤推定と結果の確認
+fit_dlm_BEERb <- dlmMLE(y = y, parm = rep(0, 3), build = build_dlm_BEERb)
+fit_dlm_BEERb
+
+# パラメータの最尤推定結果をモデルに指定
+mod <- build_dlm_BEERb(fit_dlm_BEERb$par)
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# 平滑化分布の平均
+   mu <- dropFirst(dlmSmoothed_obj$s[, 1])
+gamma <- dropFirst(dlmSmoothed_obj$s[, 2])
+
+# 結果のプロット
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "観測値(対数変換後)")
+ts.plot(   mu, ylab = "レベル成分")
+ts.plot(gamma, ylab = "周期成分")
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+
+# 対数尤度の確認
+-dlmLL(y = y, mod = mod)
+```
+
+
+####ローカルレベルモデル+周期モデル(時間領域アプローチ)+ARMAモデル
+
+```{r コード9.11, collapse=TRUE}
+#【国産ビールの生産高：AR(1)成分の考慮】
+
+# モデルの設定：ローカルレベルモデル+周期モデル(時間領域アプローチ)+AR(1)モデル
+build_dlm_BEERc <- function(par){
+  return(
+    dlmModPoly(order = 1, dW = exp(par[1]), dV = exp(par[2]))           +
+    dlmModSeas(frequency = 12, dW = c(exp(par[3]), rep(0, 10)), dV = 0) +
+    dlmModARMA(ar = ARtransPars(par[4]), sigma2 = exp(par[5]))
+  )
+}
+
+# 以降のコードは表示を省略
+
+# パラメータの最尤推定と結果の確認
+fit_dlm_BEERc <- dlmMLE(y = y, parm = rep(0, 5), build = build_dlm_BEERc)
+fit_dlm_BEERc
+ARtransPars(fit_dlm_BEERc$par[4])
+
+# パラメータの最尤推定結果をモデルに指定
+mod <- build_dlm_BEERc(fit_dlm_BEERc$par)
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# 平滑化分布の平均
+   mu <- dropFirst(dlmSmoothed_obj$s[,  1])
+gamma <- dropFirst(dlmSmoothed_obj$s[,  2])
+ arma <- dropFirst(dlmSmoothed_obj$s[, 13])
+
+# 結果のプロット
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(4, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "観測値(対数変換後)")
+ts.plot(   mu, ylab = "レベル成分")
+ts.plot(gamma, ylab = "周期成分")
+ts.plot( arma, ylab = "AR(1)成分")
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+
+# 対数尤度の確認
+-dlmLL(y = y, mod = mod)
+```
+
+
+
+
+
+
+
+##回帰モデル
+
+###例: 任天堂の株価
+
+```{r コード9.12, collapse=TRUE}
+#【任天堂の株価】
+
+# 前処理
+library(dlm)
+
+# データの読み込み
+NINTENDO <- read.csv("NINTENDO.csv")
+NINTENDO$Date <- as.Date(NINTENDO$Date)
+
+NIKKEI225 <- read.csv("NIKKEI225.csv")
+NIKKEI225$Date <- as.Date(NIKKEI225$Date)
+
+# 観測値と説明変数を設定
+y      <- NINTENDO$Close
+x_dash <- NIKKEI225$Close
+
+# 以降のコードは表示を省略
+
+# プロット
+plot(x = NINTENDO$Date , y = y     , xlab = ""    , ylab = "",
+     ylim = c(10695, 28220), type = "l", col = "lightgray")
+par(new=T)
+plot(x = NIKKEI225$Date, y = x_dash, xlab = "Time", ylab = "",
+     ylim = c(10695, 28220), type = "l", lty = "dashed"   )
+
+# 凡例
+legend(legend = c("任天堂の株価", "日経平均株価"),
+       lty = c("solid", "dashed"),
+       col = c("lightgray", "black"),
+       x = "topleft", cex = 0.6)
+```
+
+
+
+```{r コード9.13, collapse=TRUE}
+#【任天堂の株価のベータ値】
+
+# モデルの設定：回帰モデル
+build_dlm_REG <- function(par) {
+  dlmModReg(X = x_dash, dW = exp(par[1:2]), dV = exp(par[3]))
+}
+
+# パラメータの最尤推定と結果の確認
+fit_dlm_REG <- dlmMLE(y = y, parm = rep(0, 3), build = build_dlm_REG)
+fit_dlm_REG
+
+# パラメータの最尤推定結果をモデルに指定
+mod  <- build_dlm_REG(fit_dlm_REG$par)
+str(mod)
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# 以降のコードは表示を省略
+
+# 平滑化分布の平均と標準偏差を求める
+beta <- dropFirst(dlmSmoothed_obj$s[, 2])
+beta_sdev <- sqrt(dropFirst(
+               sapply(dlmSvd2var(dlmSmoothed_obj$U.S, dlmSmoothed_obj$D.S), function(x){
+                 diag(x)[2]
+               })
+             ))
+
+# 平滑化分布の50%区間のために、25%値と75%値を求める
+beta_quant <- list(beta + qnorm(0.25, sd = beta_sdev),
+                   beta + qnorm(0.75, sd = beta_sdev))
+
+# 結果のプロット
+ plot(x = NINTENDO$Date, y = beta, type="l", ylim = c(0.75, 2.0),
+      xlab = "Time", ylab = "ベータ値")
+lines(x = NINTENDO$Date, y = beta_quant[[1]], lty = "dashed")
+lines(x = NINTENDO$Date, y = beta_quant[[2]], lty = "dashed")
+
+# 凡例
+legend(legend = c("平均 (平滑化分布)", "50%区間 (平滑化分布)"),
+       lty = c("solid", "dashed"),
+       col = c("black", "black"),
+       x = "topleft", cex = 0.6)
+
+# 参考イベント
+mtext("×", at = as.Date("2015/3/17"), side = 1, adj = 0.5, line = -0.5)
+mtext("×", at = as.Date("2016/7/6" ), side = 1, adj = 0.5, line = -0.5)
+mtext("×", at = as.Date("2016/7/22"), side = 1, adj = 0.5, line = -0.5)
+mtext("2015/3/17", at = as.Date("2015/3/17"), side = 1, adj = 0, cex = 0.6)
+mtext("2016/7/6" , at = as.Date("2016/7/6" ), side = 1, adj = 1, cex = 0.6)
+mtext("2016/7/22", at = as.Date("2016/7/22"), side = 1, adj = 0, cex = 0.6)
+```
+
+
+
+
+###例: ナイル川の流量(1899年の急減を考慮)
+
+```{r コード9.14, collapse=TRUE}
+#【ナイル川の流量データにローカルレベルモデル+回帰モデル（干渉変数）を適用】
+
+# 前処理
+set.seed(123)
+library(dlm)
+
+# ナイル川の流量データ
+y <- Nile
+t_max <- length(y)
+
+# 説明変数（干渉変数）を設定
+x_dash <- rep(0, t_max)                  # 初期値として全て0（ダムなし）
+x_dash[which(1899 <= time(y))] <- 1      # 1899年以後は全て1（ダムあり）
+
+# ローカルレベルモデル+回帰モデル（干渉変数）を構築する関数
+build_dlm_DAM <- function(par) {
+  return(
+    dlmModPoly(order = 1, dV = exp(par[1]), dW = exp(par[2])) +
+    dlmModReg(X = x_dash, addInt = FALSE, dW = exp(par[3]), dV = 0)
+  )
+}
+
+# パラメータの最尤推定
+fit_dlm_DAM <- dlmMLE(y = y, parm = rep(0, 3), build = build_dlm_DAM)
+modtv <- build_dlm_DAM(fit_dlm_DAM$par)
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = modtv)
+
+# 平滑化分布の平均と分散
+stv <- dropFirst(dlmSmoothed_obj$s)
+stv_var <- dlmSvd2var(dlmSmoothed_obj$U.S, dlmSmoothed_obj$D.S)
+stv_var <- stv_var[-1]
+
+# 推定量の平均
+s <- stv[, 1] + x_dash * stv[, 2]                       # x_dashも考慮
+
+# レベル推定量の50%区間（25%値と75%値を求める）
+coeff <- cbind(1, x_dash)
+s_sdev <- sqrt(sapply(seq_along(stv_var), function(ct){ # 共分散も考慮
+            coeff[ct, ] %*% stv_var[[ct]] %*% t(coeff[ct, , drop = FALSE])
+          }))           
+s_quant <- list(s + qnorm(0.25, sd = s_sdev), s + qnorm(0.75, sd = s_sdev))
+
+# 以降のコードは表示を省略
+
+# プロット
+ts.plot(cbind(y, s, do.call("cbind", s_quant)),
+        lty=c("solid", "solid", "dashed", "dashed"),
+        col=c("lightgray", "black", "black", "black"))
+
+# 凡例
+legend(legend = c("観測値", "平均", "50%区間"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+
+
+###例: 家計における食費(曜日によって異なる影響を考慮)
+
+```{r コード9.15, collapse=TRUE}
+#【家計における消費支出（食料）】
+
+# 前処理
+library(dlm)
+
+# データの読み込み
+food <- read.csv("FOOD.csv")
+
+# データをts型に変換
+y <- ts(food$Expenditure, frequency = 12, start = c(2000, 1))
+
+# プロット
+plot(y)
+
+# データの対数変換
+y <- log(y)
+
+# 対数変換後のデータのプロット
+plot(y, ylab = "log(y)")
+```
+
+
+
+
+```{r 図9.18, echo = FALSE, results='hide'}
+#【ローカルトレンドモデル+周期モデル(時間領域アプローチ)による食費の分析】
+
+# モデルの設定：ローカルトレンドモデル+周期モデル(時間領域アプローチ)
+build_dlm_FOODa <- function(par) {
+  return(
+    dlmModPoly(order = 1, dW = exp(par[1]), dV = exp(par[2])) +
+    dlmModSeas(frequency = 12, dW = c(exp(par[3]), rep(0, times = 10)), dV = 0)
+  )
+}
+
+# パラメータの最尤推定
+fit_dlm_FOODa <- dlmMLE(y = y, parm = rep(0, 3), build = build_dlm_FOODa)
+
+# パラメータの最尤推定結果をモデルに指定
+mod  <- build_dlm_FOODa(fit_dlm_FOODa$par)
+-dlmLL(y = y, mod = mod)
+
+# カルマンフィルタリング
+dlmSmoothed_obj  <- dlmSmooth(y = y, mod = mod)
+
+# 平滑化分布の平均
+   mu <- dropFirst(dlmSmoothed_obj$s[, 1])
+gamma <- dropFirst(dlmSmoothed_obj$s[, 3])
+
+# 結果のプロット
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "観測値(対数変換後)")
+ts.plot(   mu, ylab = "レベル成分")
+ts.plot(gamma, ylab = "周期成分")
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+```
+
+
+
+```{r 図9.19, echo = FALSE, results='hide'}
+#【日ごとの食費】
+
+# 日ごとのデータ（2009年6月）の読み込み
+food_day <- read.csv("FOOD_DAY.csv")
+food_day$Date <- as.Date(food_day$Date)
+
+# 日ごとのデータ（2009年6月）の表示
+plot(x = food_day$Date, y = food_day$Expenditure,
+     type = "l", xlab = "2009年6月", ylab = "日ごとの食費[円]", xaxt = "n")
+axis(side = 1, at = food_day$Date, labels = FALSE)
+x_lab <- weekdays(food_day$Date, abbreviate = TRUE)
+x_lab[!(x_lab %in% c("土", "日"))] <- ""
+mtext(text =  x_lab, side = 1, line = 1, at = food_day$Date)
+mtext(text =  "1日", side = 1, line = 1, at = as.Date("2009-06-01"))
+mtext(text = "30日", side = 1, line = 1, at = as.Date("2009-06-30"))
+```
+
+
+
+
+```{r コード9.16, collapse=TRUE}
+#【説明変数（平日効果）の設定】
+
+# 日本の平休日を返すユーザ定義関数
+jholidays <- function(days){
+  # is.jholiday()を利用する
+  library(Nippon)
+
+  # 曜日（Day Of the Week）を求める
+  DOW <- weekdays(days)
+
+  # 土日祝（代休含む）は休日とみなす
+  holidays <- (DOW %in% c("土曜日", "日曜日")) | is.jholiday(days)
+
+  # 曜日を"休日" or "平日"で上書き
+  DOW[ holidays] <- "休日"
+  DOW[!holidays] <- "平日"
+
+  return(DOW)
+}
+
+# 検討対象期間の日付の数列
+days <- seq(from = as.Date("2000/1/1"), to = as.Date("2009/12/31"), by = "day")
+
+# 月毎に平休日の日数を集計
+monthly <- table(substr(days, start = 1, stop = 7), jholidays(days))  
+
+# 説明変数（ある月の平日から休日の総数を引いた値）
+x_dash_weekday <- monthly[, "平日"] - monthly[, "休日"]
+```
+
+
+
+```{r コード9.17, collapse=TRUE}
+#【説明変数（うるう年効果）の設定】
+
+# データ長
+t_max <- length(y)
+
+# 検討期間中のうるう年の2月
+LEAPYEAR_FEB <- (c(2000, 2004, 2008) - 2000)*12 + 2
+
+# 説明変数（うるう年の2月のみ1）
+x_dash_leapyear <- rep(0, t_max)          # 初期値は全て0
+x_dash_leapyear[LEAPYEAR_FEB] <- 1        # うるう年の2月は1
+```
+
+
+
+```{r コード9.18, collapse=TRUE}
+#【ローカルレベルモデル+周期モデル(時間領域アプローチ)+回帰モデルによる食費の分析】
+
+# 説明変数（平日効果、うるう年効果）を統合
+x_dash <- cbind(x_dash_weekday, x_dash_leapyear)
+
+# ローカルレベルモデル+周期モデル（時間領域）+回帰モデルを構築する関数
+build_dlm_FOODb <- function(par) {
+  return(
+    dlmModPoly(order = 1, dW = exp(par[1]), dV = exp(par[2]))         +
+    dlmModSeas(frequency = 12, dW = c(0, rep(0, times = 10)), dV = 0) +
+    dlmModReg(X = x_dash, addInt = FALSE, dV = 0)
+  )
+}
+
+# パラメータの最尤推定
+fit_dlm_FOODb <- dlmMLE(y = y, parm = rep(0, 2), build = build_dlm_FOODb)
+
+# パラメータの最尤推定結果をモデルに指定
+mod  <- build_dlm_FOODb(fit_dlm_FOODb$par)
+-dlmLL(y = y, mod = mod)
+
+# カルマンフィルタリング
+dlmSmoothed_obj  <- dlmSmooth(y = y, mod = mod)
+
+# 平滑化分布の平均
+    mu <- dropFirst(dlmSmoothed_obj$s[, 1])
+ gamma <- dropFirst(dlmSmoothed_obj$s[, 3])
+beta_w <- dropFirst(dlmSmoothed_obj$s[, 13])[t_max]  # 時不変
+beta_l <- dropFirst(dlmSmoothed_obj$s[, 14])[t_max]  # 時不変
+
+# 結果の確認
+cat(beta_w, beta_l, "\n")
+
+# 回帰成分の平均
+reg <- x_dash %*% c(beta_w, beta_l)
+tsp(reg) <- tsp(y)
+
+# 結果のプロット
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(4, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "観測値(対数変換後)")
+ts.plot(   mu, ylab = "レベル成分")
+ts.plot(gamma, ylab = "周期成分")
+ts.plot(  reg, ylab = "回帰成分")
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r plotをpdf化する際の終了処理, echo = FALSE, include = FALSE}
+#【plotをpdf化する際の終了処理】
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext.end()
+
+  dev.off()
+}
+```

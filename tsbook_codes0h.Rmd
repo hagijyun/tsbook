@@ -1,0 +1,344 @@
+---
+title: "コード"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=0]
+---
+
+
+```{r Setup用, echo = FALSE, include = FALSE}
+# 作業ディレクトリ・・・お好みの場所をご設定ください
+setwd("C:/cygwin/home/NOC/book/doc")
+
+# コンソール出力の文字幅
+options(width = 84)
+
+# plot関連の設定
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # PDFファイルに出力する場合
+  pdf(height = 7 / (4/3))
+
+  # フォント情報はラスタライズする
+  require(showtext)
+  font.add("meiryo", "meiryo.ttc")
+  par(family = "meiryo")
+  showtext.begin()
+}
+```
+
+
+
+
+
+
+
+
+
+#付録H: ライブラリによる粒子フィルタリングの実行
+
+
+```{r 便利な関数類の事前ロード, collapse=TRUE, include = FALSE}
+#【粒子の重み付き分位値を求める（ライブラリdlmで配布されたユーティリティ関数）】
+
+# quantile function for weighted particle clouds
+weighted.quantile <- function(x, w, probs)
+{
+  ## Make sure 'w' is a probability vector
+  if ((s <- sum(w)) != 1)
+    w <- w / s
+  ## Sort 'x' values
+  ord <- order(x)
+  x <- x[ord]
+  w <- w[ord]
+  ## Evaluate cdf
+  W <- cumsum(w)
+  ## Invert cdf
+  tmp <- outer(probs, W, "<=")
+  n <- length(x)
+  quantInd <- apply(tmp, 1, function(x) (1 : n)[x][1])
+  ## Return
+  ret <- x[quantInd]
+  ret[is.na(ret)] <- x[n]
+  return(ret)
+}
+```
+
+##例: 人工的なローカルレベルモデル
+
+###Biips
+
+
+```{r コードH.1, collapse=TRUE}
+#【パラメータが既知のローカルレベルモデルで粒子フィルタリング（Biips）】
+
+# 前処理
+set.seed(4521)
+library(Rbiips)
+
+# 粒子フィルタの事前設定
+N <- 10000                    # 粒子数
+
+# 人工的なローカルレベルモデルに関するデータを読み込み
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# ※注意：事前分布を時点1とし、本来の時点1~t_maxを+1シフトして2~t_max+1として扱う
+
+# データの整形(事前分布に相当するダミー分(先頭)を追加)
+y <- c(NA_real_, y)
+
+# モデル：生成
+biips_mod <- biips_model(file = "modelH-1.biips",
+                         data = list(t_max = t_max, y = y,
+                                     W = mod$W, V = mod$V,
+                                     m0 = mod$m0, C0 = mod$C0)
+             )
+
+# 粒子フィルタリング：実行
+biips_smc_out <- biips_smc_samples(object = biips_mod, n_part = N,
+                                   variable_names = "x",
+                                   rs_thres = 1.0
+                 )    
+
+# 平均・25%値・75%値を求める
+biips_summary_out <- biips_summary(object = biips_smc_out,
+                                   probs = c(0.25, 0.75))
+biips_m     <- biips_summary_out$x$f$mean
+biips_quant <- biips_summary_out$x$f$quant
+
+# 結果の整形(事前分布に相当する分(先頭)を除去)
+biips_m       <- biips_m[-1]
+biips_m_quant <- lapply(biips_quant, function(x){ x[-1] })
+            y <- y[-1]
+
+# 以降のコードは表示を省略
+
+# 結果のプロット
+ts.plot(cbind(y, m, biips_m),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "平均 （カルマンフィルタリング)",  "平均 （粒子フィルタリング)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+# 結果のプロット
+ts.plot(cbind(y, do.call("cbind", m_quant), do.call("cbind", biips_m_quant)),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "50%区間 （カルマンフィルタリング)",  "50%区間 （粒子フィルタリング)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+```
+
+
+###pomp
+
+
+```{r コードH.3, collapse=TRUE}
+#【パラメータが既知のローカルレベルモデルで粒子フィルタリング（pomp）】
+
+# 前処理
+set.seed(4521)
+library(pomp)
+
+# 粒子フィルタの事前設定
+N <- 10000                    # 粒子数
+
+# 人工的なローカルレベルモデルに関するデータを読み込み
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# モデル：規定
+
+# 状態方程式（抽出）
+state_draw <- function(x, t, params, delta.t, ...){
+  setNames(rnorm(1, mean = x["X"], sd = sqrt(params["W"])), "X")
+}
+
+# 観測方程式（抽出）
+obs_draw <- function(x, t, params, ...){
+  setNames(rnorm(1, mean = x["X"], sd = sqrt(params["V"])), "Y")
+}
+
+# 観測方程式（評価）
+obs_eval <- function(y, x, t, params, log, ...){
+  dnorm(y["Y"], mean = x["X"], sd = sqrt(params["V"]), log = log)
+}
+
+# モデル：生成
+pomp_mod <- pomp(data = data.frame(time = seq_along(y), Y = y), 
+                 times = "time", t0 = 0,
+                 rprocess = discrete.time.sim(step.fun = state_draw,
+                                              delta.t = 1),
+                 rmeasure = obs_draw, dmeasure = obs_eval
+            )
+
+# 粒子フィルタリング：実行
+pomp_smc_out <- pfilter(object = pomp_mod, Np = N,
+                        params = c(W = mod$W, V = mod$V, X.0 = mod$m0),
+                        save.states = TRUE
+                )
+
+# 平均・25%値・75%値を求める
+pomp_m       <- sapply(1:t_max, function(t){
+                  mean(pomp_smc_out$saved.states[[t]])
+                })
+pomp_m_quant <- sapply(1:t_max, function(t){
+                  quantile(pomp_smc_out$saved.states[[t]], probs=c(0.25, 0.75))
+                })
+
+# 以降のコードは表示を省略
+
+# 結果のプロット
+ts.plot(cbind(y, m, pomp_m),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "平均 （カルマンフィルタリング)",  "平均 （粒子フィルタリング)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+# 結果のプロット
+ts.plot(cbind(y, do.call("cbind", m_quant), cbind(pomp_m_quant["25%", ], pomp_m_quant["75%", ])),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "50%区間 （カルマンフィルタリング)",  "50%区間 （粒子フィルタリング)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+```
+
+
+
+###NIMBLE
+
+
+```{r コードH.4, collapse=TRUE}
+#【パラメータが既知のローカルレベルモデルで粒子フィルタリング（NIMBLE）】
+
+# 前処理
+set.seed(4521)
+library(nimble)
+
+# 粒子フィルタの事前設定
+N <- 10000                    # 粒子数
+
+# 人工的なローカルレベルモデルに関するデータを読み込み
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# ※注意：事前分布を時点1とし、本来の時点1~t_maxを+1シフトして2~t_max+1として扱う
+
+# データの整形(事前分布に相当するダミー分(先頭)を追加)
+y <- c(NA_real_, y)
+
+# モデル：規定
+nimble_mod_script <- nimbleCode({
+  # 状態方程式
+  x[1] ~ dnorm(m0, 1/C0)
+  for (t in 2:(t_max+1)){
+    x[t] ~ dnorm(x[t-1], 1/W)
+  }
+
+  # 観測方程式
+  # y[1]の分はダミー
+  for (t in 2:(t_max+1)){
+    y[t] ~ dnorm(x[t], 1/V)
+  }
+})
+
+# モデル：生成
+nimble_mod <- nimbleModel(code = nimble_mod_script,
+                          data = list(y = y),
+                          constants = list(t_max = t_max,
+                                           W = mod$W, V = mod$V,
+                                           m0 = mod$m0, C0 = mod$C0)
+              )
+
+# 粒子フィルタリング：生成
+nimble_smc_out <- buildBootstrapFilter(model = nimble_mod,
+                                       nodes = "x",
+                                       control = list(thresh = 1.0,
+                                                      saveAll = TRUE)
+                  )
+
+# モデル：コンパイル
+compiled_nimble_mod <- compileNimble(nimble_mod)
+
+# 粒子フィルタリング：コンパイル
+compiled_nimble_smc_out <- compileNimble(nimble_smc_out, project = nimble_mod)
+
+# 粒子フィルタリング：実行
+compiled_nimble_smc_out$run(m = N)     # 完了すると尤度が表示される
+
+# 状態と重みの値を取り出し、結果を整形(事前分布に相当する分(先頭)を除去等)
+nimble_x <- as.matrix(compiled_nimble_smc_out$mvWSamples, "x"  )
+nimble_x <- t(    nimble_x[, -1])
+nimble_w <- as.matrix(compiled_nimble_smc_out$mvWSamples, "wts")
+nimble_w <- t(exp(nimble_w[, -1]))
+       y <- y[-1]
+
+# 平均・25%値・75%値を求める
+nimble_m       <- sapply(1:t_max, function(t){
+                    weighted.mean(nimble_x[t, ], w = nimble_w[t, ])
+                  })
+nimble_m_quant <- lapply(c(0.25, 0.75), function(quant){
+                    sapply(1:t_max, function(t){
+                      weighted.quantile(nimble_x[t, ], w = nimble_w[t, ],
+                                        probs = quant)
+                    })
+                  })
+
+# 以降のコードは表示を省略
+
+# 結果のプロット
+ts.plot(cbind(y, m, nimble_m),
+        col = c("lightgray", "blue", "red"),
+        lty = c("solid", "solid", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "平均 （カルマンフィルタリング)",  "平均 （粒子フィルタリング)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+
+# 結果のプロット
+ts.plot(cbind(y, do.call("cbind", m_quant), do.call("cbind", nimble_m_quant)),
+        col = c("lightgray", "blue", "blue", "red", "red"),
+        lty = c("solid", "solid", "solid", "dashed", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "50%区間 （カルマンフィルタリング)",  "50%区間 （粒子フィルタリング)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 70, cex = 0.6)
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r plotをpdf化する際の終了処理, echo = FALSE, include = FALSE}
+#【plotをpdf化する際の終了処理】
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext.end()
+
+  dev.off()
+}
+```

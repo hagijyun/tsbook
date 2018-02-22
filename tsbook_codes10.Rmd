@@ -1,0 +1,601 @@
+---
+title: "コード"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=9]
+---
+
+
+```{r Setup用, echo = FALSE, include = FALSE}
+# 作業ディレクトリ・・・お好みの場所をご設定ください
+setwd("C:/cygwin/home/NOC/book/doc")
+
+# コンソール出力の文字幅
+options(width = 84)
+
+# plot関連の設定
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # PDFファイルに出力する場合
+  pdf(height = 7 / (4/3))
+
+  # フォント情報はラスタライズする
+  require(showtext)
+  font.add("meiryo", "meiryo.ttc")
+  par(family = "meiryo")
+  showtext.begin()
+}
+```
+
+
+
+
+#一般状態空間モデルの一括解法
+
+##MCMC
+
+```{r 図10.1, echo = FALSE, results='hide'}
+#【マルコフ連鎖の収束例】
+ 
+# https://rstudio-pubs-static.s3.amazonaws.com/29244_555e5b85c5ba49f384d4ab502dd96fae.htmlを参考にしました
+
+# 前処理
+require(rstan)
+set.seed(1234)
+
+# 収束しない例
+non_converged_model <- "
+  parameters{
+    real a;
+    real b;
+  }
+
+  model{
+    0 ~ normal(a + b, 1);
+  }
+"
+stan_fit_tmp <- stan(model_code = non_converged_model, seed = 12343)
+stan_out_tmp <- rstan::extract(stan_fit_tmp, permuted = FALSE)[, , "a"]
+
+sample_min <- min(stan_out_tmp)
+sample_max <- max(stan_out_tmp)
+sample_len <- dim(stan_out_tmp)[1]
+sample_var <- dim(stan_out_tmp)[2]
+dens_len <- 512
+
+x_val <- density(stan_out_tmp[, 1], from = sample_min, to = sample_max)$x
+y_val <- sapply(1:sample_var, function(i){
+           density(stan_out_tmp[, i], from = sample_min, to = sample_max)$y
+         })
+
+split.screen(rbind(c(0, 0.7, 0, 1), c(0.7, 1, 0, 1)))
+chain <- c("dotted", "dashed", "blank", "solid")
+
+screen(1); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 2, 2, 1))
+for (i in c(1, 2, 4)){
+  if (i != 1){ par(new = TRUE) }
+  plot(stan_out_tmp[, i], type = "l", lty = chain[i], ann = FALSE, axes = FALSE,
+       xlim = c(1, sample_len), ylim = c(sample_min, sample_max))
+}
+axis(side = 1, xlim = c(1, sample_len))
+mtext(text = "探索ステップ数", side = 1, line = 2)
+mtext(text = "サンプルの値", side = 2, line = 0)
+legend("topright", legend = c("1本目", "2本目", "3本目"), lty = chain[c(1, 2, 4)], cex = 0.6)
+
+screen(2); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 0, 2, 0))
+plot(0, type = "n", ann = FALSE, axes = FALSE,
+     xlim = c(min(y_val), max(y_val)*2.0), ylim = c(sample_min, sample_max*1.1))
+for (i in c(1, 2, 4)){
+  polygon(y = c(x_val, rev(x_val)), x = c(y_val[, i], rep(y_val[dens_len, i], dens_len)),
+          border = NA, col = rgb(0.5, 0.5, 0.5, 0.5))
+  lines(x = y_val[, i], y = x_val, lty = chain[i])
+}
+text(x = max(y_val), y = median(x_val), adj = -0.2, labels = "関心のある分布", srt = -90)
+
+close.screen(all = TRUE)
+
+# 収束する例
+converged_model <- "
+  parameters{
+    real<lower=0> a;
+    real<lower=0> b;
+  }
+
+  model{
+    0 ~ normal(a + b, 1);
+  }
+"
+stan_fit_tmp <- stan(model_code = converged_model, seed = 12343)
+stan_out_tmp <- rstan::extract(stan_fit_tmp, permuted = FALSE)[, , "a"]
+
+sample_min <- min(stan_out_tmp)
+sample_max <- max(stan_out_tmp)
+sample_len <- dim(stan_out_tmp)[1]
+sample_var <- dim(stan_out_tmp)[2]
+dens_len <- 512
+
+x_val <- density(stan_out_tmp[, 1], from = sample_min, to = sample_max)$x
+y_val <- sapply(1:sample_var, function(i){
+           density(stan_out_tmp[, i], from = sample_min, to = sample_max)$y
+         })
+
+split.screen(rbind(c(0, 0.7, 0, 1), c(0.7, 1, 0, 1)))
+chain <- c("dotted", "dashed", "blank", "solid")
+
+screen(1); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 2, 2, 1))
+for (i in c(1, 2, 4)){
+  if (i != 1){ par(new = TRUE) }
+  plot(stan_out_tmp[, i], type = "l", lty = chain[i], ann = FALSE, axes = FALSE,
+       xlim = c(1, sample_len), ylim = c(sample_min, sample_max))
+}
+axis(side = 1, xlim = c(1, sample_len))
+mtext(text = "探索ステップ数", side = 1, line = 2)
+mtext(text = "サンプルの値", side = 2, line = 0)
+legend("topright", legend = c("1本目", "2本目", "3本目"), lty = chain[c(1, 2, 4)], cex = 0.6)
+
+screen(2); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 0, 2, 0))
+plot(0, type = "n", ann = FALSE, axes = FALSE,
+     xlim = c(min(y_val), max(y_val)*2.0), ylim = c(sample_min, sample_max*1.1))
+for (i in c(1, 2, 4)){
+  polygon(y = c(x_val, rev(x_val)), x = c(y_val[, i], rep(y_val[dens_len, i], dens_len)),
+          border = NA, col = rgb(0.5, 0.5, 0.5, 0.5))
+  lines(x = y_val[, i], y = x_val, lty = chain[i])
+}
+text(x = max(y_val), y = median(x_val), adj = -0.2, labels = "関心のある分布", srt = -90)
+
+close.screen(all = TRUE)
+```
+
+
+##MCMCによる状態の推定
+
+##ライブラリの活用
+
+###様々なライブラリ
+
+###例: 人工的なローカルレベルモデル
+
+```{r コード10.2, collapse=TRUE}
+#【MCMCを活用したローカルレベルモデルの平滑化（パラメータが既知）】
+
+# 前処理
+set.seed(123)
+library(rstan)
+
+# Stanの事前設定：コードのHDD保存、並列演算、グラフの縦横比
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+theme_set(theme_get() + theme(aspect.ratio = 3/4))
+
+# 人工的なローカルレベルモデルに関するデータを読み込み
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# モデル：生成・コンパイル
+stan_mod_out <- stan_model(file = "model10-1.stan")
+
+# 平滑化：実行（サンプリング）
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = y, 
+                                 W = mod$W, V = mod$V, 
+                                 m0 = mod$m0, C0 = mod$C0),
+                     pars = c("x"),
+                     seed = 123
+            )
+
+# 結果の確認
+oldpar <- par(no.readonly = TRUE); options(max.print = 99999)
+fit_stan
+options(oldpar)
+traceplot(fit_stan, pars = c(sprintf("x[%d]", 100), "lp__"), alpha = 0.5)
+
+# 必要なサンプリング結果を取り出す
+stan_mcmc_out <- rstan::extract(fit_stan, pars = "x")
+str(stan_mcmc_out)
+
+# 周辺化を行い、平均・25%値・75%値を求める
+s_mcmc <- colMeans(stan_mcmc_out$x)
+s_mcmc_quant <- apply(stan_mcmc_out$x, 2, FUN = quantile, probs=c(0.25, 0.75))
+
+# 以降のコードは表示を省略
+
+# 結果のプロット
+ts.plot(cbind(y, s), col = c("lightgray", "blue"))
+lines(s_mcmc, col = "red", lty = "dashed")
+
+# 凡例
+legend(legend = c("観測値", "平均 （カルマン平滑化)",  "平均 （MCMC)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 50, cex = 0.6)
+
+# 結果のプロット
+ts.plot(cbind(y, do.call("cbind", s_quant)),
+        col = c("lightgray", "blue", "blue"))
+lines(s_mcmc_quant["25%", ], col = "red", lty = "dashed")
+lines(s_mcmc_quant["75%", ], col = "red", lty = "dashed")
+
+# 凡例
+legend(legend = c("観測値", "50%区間 （カルマン平滑化)",  "50%区間 （MCMC)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 60, cex = 0.6)
+```
+
+
+
+##一般状態空間モデルにおける推定例
+
+```{r コード10.4, collapse=TRUE}
+#【MCMCを活用したローカルレベルモデルの平滑化（パラメータが未知）】
+
+# 前処理
+set.seed(123)
+library(rstan)
+
+# Stanの事前設定：コードのHDD保存、並列演算、グラフの縦横比
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+theme_set(theme_get() + theme(aspect.ratio = 3/4))
+
+# 人工的なローカルレベルモデルに関するデータを読み込み
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# モデル：生成・コンパイル
+stan_mod_out <- stan_model(file = "model10-2.stan")
+
+# 平滑化：実行（サンプリング）
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = y, 
+                                 m0 = mod$m0, C0 = mod$C0),
+                     pars = c("W", "V", "x"),
+                     seed = 123
+            )
+
+# 結果の確認
+oldpar <- par(no.readonly = TRUE); options(max.print = 99999)
+fit_stan
+
+# 以降のコードは表示を省略
+
+options(oldpar)
+traceplot(fit_stan, pars = c("W", "V"), alpha = 0.5)
+
+# 必要なサンプリング結果を取り出す
+stan_mcmc_out <- rstan::extract(fit_stan, pars = "x")
+
+# 周辺化を行い、平均・25%値・75%値を求める
+s_mcmc <- colMeans(stan_mcmc_out$x)
+s_mcmc_quant <- apply(stan_mcmc_out$x, 2, FUN = quantile, probs=c(0.25, 0.75))
+
+# 結果のプロット
+ts.plot(cbind(y, s), col = c("lightgray", "blue"))
+lines(s_mcmc, col = "red", lty = "dashed")
+
+# 凡例
+legend(legend = c("観測値", "平均 （カルマン平滑化)",  "平均 （MCMC)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 50, cex = 0.6)
+
+# 結果のプロット
+ts.plot(cbind(y, do.call("cbind", s_quant)),
+        col = c("lightgray", "blue", "blue"))
+lines(s_mcmc_quant["25%", ], col = "red", lty = "dashed")
+lines(s_mcmc_quant["75%", ], col = "red", lty = "dashed")
+
+# 凡例
+legend(legend = c("観測値", "50%区間 （カルマン平滑化)",  "50%区間 （MCMC)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 60, cex = 0.6)
+```
+
+
+##推定精度向上のためのテクニック
+
+###線形・ガウス型状態空間モデルが部分的にあてはまる場合
+
+###例: 人工的なローカルレベルモデル
+
+```{r コード10.6, collapse=TRUE}
+#【MCMCを活用したローカルレベルモデルの平滑化（パラメータが未知、カルマンフィルタを活用）】
+
+# 前処理
+set.seed(123)
+library(rstan)
+
+# Stanの事前設定：コードのHDD保存、並列演算、グラフの縦横比
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+theme_set(theme_get() + theme(aspect.ratio = 3/4))
+
+# 人工的なローカルレベルモデルに関するデータを読み込み
+load(file = "ArtifitialLocalLevelModel.RData")
+
+# モデル：生成・コンパイル
+stan_mod_out <- stan_model(file = "model10-3.stan")
+
+# 平滑化：実行（サンプリング）
+dim(mod$m0) <- 1               # ベクトル要素が1つの場合は、明示的に次元を設定
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = matrix(y, nrow = 1), 
+                                 G = mod$G, F = t(mod$F),
+                                 m0 = mod$m0, C0 = mod$C0),
+                     pars = c("W", "V"),
+                     seed = 123
+            )
+
+# 結果の確認
+fit_stan
+traceplot(fit_stan, pars = c("W", "V"), alpha = 0.5)
+```
+
+
+
+
+```{r コード10.7, collapse=TRUE}
+#【MCMCを活用したローカルレベルモデルの平滑化（FFBSで状態を再生）】
+
+# 前処理
+set.seed(123)
+library(dlm)
+
+# 必要なサンプリング結果を取り出す
+stan_mcmc_out <- rstan::extract(fit_stan, pars = c("W", "V"))
+
+# FFBSの前処理：MCMCの繰り返しステップを設定、進捗バーの設定
+it_seq <- seq_along(stan_mcmc_out$V[, 1, 1])
+progress_bar <- txtProgressBar(min = 1, max = max(it_seq), style = 3)
+
+# FFBSの本処理：状態の再生
+x_FFBS <- sapply(it_seq, function(it){
+  # 進捗バーの表示
+  setTxtProgressBar(pb = progress_bar, value = it)
+
+  # W, Vの値をモデルに設定
+  mod$W[1, 1] <- stan_mcmc_out$W[it, 1, 1]
+  mod$V[1, 1] <- stan_mcmc_out$V[it, 1, 1]
+
+  # FFBSの実行
+  return(dlmBSample(dlmFilter(y = y, mod = mod)))
+})
+
+# FFBSの後処理：x0の分を除去して転置（Stanの出力と整合させて、列が時間方向）
+x_FFBS <- t(x_FFBS[-1, ])
+
+# 周辺化を行い、平均・25%値・75%値を求める
+s_FFBS <- colMeans(x_FFBS)
+s_FFBS_quant <- apply(x_FFBS, 2, FUN = quantile, probs=c(0.25, 0.75))
+
+# 以降のコードは表示を省略
+
+# 結果のプロット
+ts.plot(cbind(y, s), col = c("lightgray", "blue"))
+lines(s_FFBS, col = "red", lty = "dashed")
+
+# 凡例
+legend(legend = c("観測値", "平均 （カルマン平滑化)",  "平均 （FFBS)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 50, cex = 0.6)
+
+# 結果のプロット
+ts.plot(cbind(y, do.call("cbind", s_quant)),
+        col = c("lightgray", "blue", "blue"))
+lines(s_FFBS_quant["25%", ], col = "red", lty = "dashed")
+lines(s_FFBS_quant["75%", ], col = "red", lty = "dashed")
+
+# 凡例
+legend(legend = c("観測値", "50%区間 （カルマン平滑化)",  "50%区間 （FFBS)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", text.width = 60, cex = 0.6)
+```
+
+
+
+
+###例: 英国における自動車運転者死傷者数
+
+```{r コード10.8, collapse=TRUE}
+#【英国における自動車運転者死傷者数：カルマン平滑化】
+
+# 前処理
+set.seed(123)
+library(dlm)
+
+# データを対数変換、時系列長の設定
+y <- log(UKDriverDeaths)
+t_max <- length(y)
+
+# 横軸時間のプロット
+plot(y)
+
+# モデルのテンプレート
+mod <- dlmModPoly(order = 1) + dlmModSeas(frequency = 12)
+
+# モデルを定義・構築するユーザ定義関数
+build_dlm_UKD <- function(par) {
+  mod$W[1, 1] <- exp(par[1])
+  mod$W[2, 2] <- exp(par[2])
+  mod$V[1, 1] <- exp(par[3])
+
+  return(mod)
+}
+
+# パラメータの最尤推定
+fit_dlm_UKD <- dlmMLE(y = y, parm = rep(0, times = 3), build = build_dlm_UKD)
+
+# モデルの設定と結果の確認
+mod <- build_dlm_UKD(fit_dlm_UKD$par)
+cat(diag(mod$W)[1:2], mod$V, "\n")
+
+# 平滑化処理
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+
+# 平滑化分布の平均
+   mu <- dropFirst(dlmSmoothed_obj$s[, 1])
+gamma <- dropFirst(dlmSmoothed_obj$s[, 2])
+
+# 結果のプロット
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(3, 1)); par(oma = c(2, 0, 0, 0)); par(mar = c(2, 4, 1, 1))
+ts.plot(    y, ylab = "観測値(対数変換後)")
+ts.plot(   mu, ylab = "レベル成分")
+ts.plot(gamma, ylab = "周期成分")
+mtext(text = "Time", side = 1, line = 1, outer = TRUE)
+par(oldpar)
+```
+
+
+
+
+```{r コード10.10, collapse=TRUE}
+#【英国における自動車運転者死傷者数：MCMCで状態もサンプリングする】
+
+# 前処理
+set.seed(123)
+library(rstan)
+
+# Stanの事前設定：コードのHDD保存、並列演算、グラフの縦横比
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+theme_set(theme_get() + theme(aspect.ratio = 3/4))
+
+# モデル：生成・コンパイル
+stan_mod_out <- stan_model(file = "model10-4.stan")
+
+# 平滑化：実行（サンプリング）
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(n = t_max, y = y, m0 = mod$m0, C0 = mod$C0), 
+                     pars = c("W_mu", "W_gamma", "V"),
+                     seed = 123
+            )
+
+# 結果の確認
+fit_stan
+traceplot(fit_stan, pars = c("W_mu", "W_gamma", "V"), alpha = 0.5)
+```
+
+
+
+
+```{r コード10.12, collapse=TRUE}
+#【英国における自動車運転者死傷者数：MCMCで状態はサンプリングしない】
+
+# 前処理
+set.seed(123)
+library(rstan)
+
+# Stanの事前設定：コードのHDD保存、並列演算、グラフの縦横比
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+theme_set(theme_get() + theme(aspect.ratio = 3/4))
+
+# モデル：生成・コンパイル
+stan_mod_out <- stan_model(file = "model10-5.stan")
+
+# 平滑化：実行（サンプリング）
+fit_stan <- sampling(object = stan_mod_out,
+                     data = list(t_max = t_max, y = matrix(y, nrow = 1), 
+                                 G = mod$G, F = t(mod$F),
+                                 m0 = mod$m0, C0 = mod$C0),
+                     pars = c("W_mu", "W_gamma", "V"),
+                     seed = 123
+            )
+
+# 結果の確認
+fit_stan
+traceplot(fit_stan, pars = c("W_mu", "W_gamma", "V"), alpha = 0.5)
+
+# 推定結果の周辺分布の平均を確認
+cat(summary(fit_stan)$summary[   "W_mu", "mean"],
+    summary(fit_stan)$summary["W_gamma", "mean"],
+    summary(fit_stan)$summary[ "V[1,1]", "mean"], "\n")
+```
+
+
+
+
+```{r コード10.13, collapse=TRUE}
+#【英国における自動車運転者死傷者数：FFBSで状態を再生】
+
+# 前処理
+set.seed(123)
+library(dlm)
+
+# 必要なサンプリング結果を取り出す
+stan_mcmc_out <- rstan::extract(fit_stan, pars = c("W_mu", "W_gamma", "V"))
+
+# FFBSの前処理：MCMCの繰り返しステップを設定、進捗バーの設定
+it_seq <- seq_along(stan_mcmc_out$V[, 1, 1])
+progress_bar <- txtProgressBar(min = 1, max = max(it_seq), style = 3)
+
+# FFBSの本処理：状態の再生
+x_FFBS <- lapply(it_seq, function(it){
+  # 進捗バーの表示
+  setTxtProgressBar(pb = progress_bar, value = it)
+
+  # W, Vの値をモデルに設定
+  mod$W[1, 1] <- stan_mcmc_out$W_mu[it]
+  mod$W[2, 2] <- stan_mcmc_out$W_gamma[it]
+  mod$V[1, 1] <- stan_mcmc_out$V[it, 1, 1]
+
+  # FFBSの実行
+  return(dlmBSample(dlmFilter(y = y, mod = mod)))
+})
+
+# FFBSの後処理：x0の分を除去して転置（Stanの出力と整合させて、列が時間方向）
+   x_mu_FFBS <- t(sapply(x_FFBS, function(x){ x[-1, 1] }))
+x_gamma_FFBS <- t(sapply(x_FFBS, function(x){ x[-1, 2] }))
+
+# 周辺化を行い、平均を求める
+   mu_FFBS <- colMeans(   x_mu_FFBS)
+gamma_FFBS <- colMeans(x_gamma_FFBS)
+
+# 以降のコードは表示を省略
+
+# ts型に変換
+   mu_FFBS <- ts(   mu_FFBS); tsp(   mu_FFBS) <- tsp(   mu)
+gamma_FFBS <- ts(gamma_FFBS); tsp(gamma_FFBS) <- tsp(gamma)
+
+# 結果のプロット
+ts.plot(cbind(y, mu), col = c("lightgray", "blue"))
+lines(mu_FFBS, col = "red", lty = "dashed")
+
+# 凡例
+legend(legend = c("観測値", "平均 （カルマン平滑化)",  "平均 （FFBS)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright",  cex = 0.6)
+
+# 結果のプロット
+ts.plot(gamma, col = "blue", ylab = "", ylim = c(-0.15, 0.31))
+lines(gamma_FFBS, col = "red", lty = "dashed")
+
+# 凡例
+legend(legend = c("観測値", "平均 （カルマン平滑化)",  "平均 （FFBS)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "blue", "red"),
+       x = "topright", cex = 0.6)
+```
+
+
+
+
+
+
+
+
+
+
+```{r plotをpdf化する際の終了処理, echo = FALSE, include = FALSE}
+#【plotをpdf化する際の終了処理】
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext.end()
+
+  dev.off()
+}
+```

@@ -1,0 +1,110 @@
+---
+title: "コード"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=4]
+---
+
+
+
+```{r Setup用, echo = FALSE, include = FALSE}
+# 作業ディレクトリ・・・お好みの場所をご設定ください
+setwd("C:/cygwin/home/NOC/book/doc")
+
+# コンソール出力の文字幅
+options(width = 84)
+
+# plot関連の設定
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # PDFファイルに出力する場合
+  pdf(height = 7 / (4/3))
+
+  # フォント情報はラスタライズする
+  require(showtext)
+  font.add("meiryo", "meiryo.ttc")
+  par(family = "meiryo")
+  showtext.begin()
+}
+```
+
+
+
+#状態空間モデル
+
+
+##確率的なモデル
+
+```{r 図5.1, include = FALSE}
+#【ナイル川における年間流量に関するデータを確率的にとらえる】
+
+# 前処理
+library(dlm)
+
+# ローカルレベルモデルを構築する関数
+build_dlm <- function(par) {
+  dlmModPoly(order = 1, dV = exp(par[1]), dW = exp(par[2]))
+}
+
+# パラメータの最尤推定
+fit_dlm <- dlmMLE(y = Nile, parm = rep(0, 2), build = build_dlm)
+
+# カルマンフィルタ
+dlmFiltered_obj <- dlmFilter(y = Nile, mod = build_dlm(fit_dlm$par))
+
+# 観測値の一期先予測分布に関する平均と分散
+m <- dlmFiltered_obj$f
+m_var <- as.numeric(dlmSvd2var(dlmFiltered_obj$U.R, dlmFiltered_obj$D.R))
+
+# 描画データの作成
+
+# 観測値方向のグリッド点(512点)
+x_mat <- seq(from = min(Nile), to = max(Nile), length.out = 512)
+
+# 時間方向
+y_mat <- time(Nile)
+
+# 確率密度
+z_mat <- t(sapply(seq_along(Nile), function(t){
+           dnorm(x_mat, mean = m[t], sd = sqrt(m_var[t]))
+         }))
+
+# MATLABにデータをエクスポートする
+library(R.matlab)
+writeMat("Nile_3Dplot.mat",
+         x  = x_mat  , y  = y_mat, z  = z_mat,
+         x1 = Nile  , y1 = y_mat, z1 = rep(0, length(Nile)))
+
+# MATLABコード(開始)
+# h = waterfall(x, y, z)
+# set(h, 'FaceColor', 'flat');
+# set(h, 'FaceAlpha', 0.2);
+# set(h, 'EdgeColor', [0.5, 0.5 0.5]);
+# set(gca,'YDir','reverse');
+# set(gca,'ZTickLabel','');
+# 
+# hold on;
+# plot3(x1, y1, z1, 'LineStyle', '-', 'LineWidth', 2.5, 'Color', [1.0, 0.0, 0.0 1.0])
+# xlim([450 1370]); ylim([1870 1970])
+# xlabel('Nile', 'FontSize', 14); ylabel('Time', 'FontSize', 14)
+# daspect([3000 100 0.1])
+# view(55.3, 49.2)
+# 
+# print('ナイル川における年間流量に関するデータを確率的にとらえる', '-r600', '-dpdf');
+# MATLABコード(終了)
+```
+
+
+
+
+
+```{r plotをpdf化する際の終了処理, echo = FALSE, include = FALSE}
+#【plotをpdf化する際の終了処理】
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext.end()
+
+  dev.off()
+}
+```

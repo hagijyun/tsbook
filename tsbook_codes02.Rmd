@@ -1,0 +1,230 @@
+---
+title: "コード"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=1]
+---
+
+
+```{r Setup用, echo = FALSE, include = FALSE}
+# 作業ディレクトリ・・・お好みの場所をご設定ください
+setwd("C:/cygwin/home/NOC/book/doc")
+
+# コンソール出力の文字幅
+options(width = 84)
+
+# 描画に関する前処理（グラフのデフォルト設定を保存してから、これを変更する）
+oldpar <- par(no.readonly = TRUE)
+
+# plot関連の設定
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # PDFファイルに出力する場合
+  pdf(height = 7 / (4/3))
+
+  # フォント情報はラスタライズする
+  require(showtext)
+  font.add("meiryo", "meiryo.ttc")
+  par(family = "meiryo")
+  showtext.begin()
+
+  # グラフの文字拡大率
+  par(cex.lab = 1.5); par(mar = c(5, 5, 4, 2) + 0.1)
+}
+```
+
+
+
+#確率・統計に関する基礎
+
+
+##確率について
+
+```{r 図2.1, echo = FALSE, results='hide'}
+#【確率密度関数の例】
+
+curve(dunif (x, min    = 0  , max    = 1  ),  0,  1, xlab = "実現値", ylab = "密度")
+curve(dbeta (x, shape1 = 0.5, shape2 = 0.5),  0,  1, xlab = "実現値", ylab = "密度")
+curve(dgamma(x, rate   = 1  , shape  = 2  ),  0, 10, xlab = "実現値", ylab = "密度")
+```
+
+
+##平均と分散
+
+```{r 図2.2, echo = FALSE, results='hide'}
+#【平均と分散の例】
+
+rate <- 1; shape <- 2
+curve(dgamma(x, rate = rate, shape = shape), 0, 10, xlab = "実現値", ylab = "密度")
+
+g_mean <- rate * shape
+g_sd   <- sqrt(rate * shape^2)
+
+lines(c(g_mean, g_mean), c(0, dgamma(x = g_mean, rate = rate, shape = shape)),
+      lty = "dotdash")
+text(x = g_mean, y = 0, adj = c(-0.4, 0), labels = "平均")
+lines(c(g_mean, g_mean+g_sd), c(0.07, 0.07),
+      lty = "dashed")
+text(x = g_mean, y = 0.07, adj = c(-0.2, 1.4), labels = "標準偏差")
+
+mtext(at = g_mean, side = 1, adj = 0.4, cex = 3, text = "\u261d")
+```
+
+
+##正規分布
+
+```{r 図2.3&4, echo = FALSE, results='hide'}
+#【正規分布の例】
+
+# 一次元
+curve(dnorm, -3,  3, xlab = "実現値", ylab = "密度")
+
+# 二次元
+# 前処理
+library(mvtnorm)
+
+y1 <- seq(from = -3, to = 3, length.out = 30)
+y2 <- y1
+Dens <- outer(y1, y2, function(x, y){ dmvnorm(cbind(x, y)) })
+persp(y1, y2, Dens,
+      theta = 30, phi = 30, xlab = "\nY1", ylab = "\nY2", zlab = "\n\n密度",
+      ticktype = "detailed", expand = 0.5, border = "#80808080", cex.lab = 1.0)
+```
+
+
+##複数の確率変数の関係
+
+##確率過程
+
+##共分散・相関
+
+```{r 図2.7, echo = FALSE, results='hide'}
+#【相関係数の例】
+
+# 前処理
+set.seed(23)
+library(MASS)         # mvrnorm()を利用 
+  
+# 共分散行列のデフォルト（2×2の単位行列）
+Sigma <- diag(2)
+
+# 相関係数が-0.9
+Sigma[2, 1] <- Sigma[1, 2] <- -0.9
+dat <- mvrnorm(n = 10000, mu = c(0, 0), Sigma = Sigma)
+plot(x = dat[, 1], y = dat[, 2],  pch = ".", cex = 1.5, #cex.lab = 2,
+     xlim = c(-2, 2), xlab = expression(X),
+     ylim = c(-2, 2), ylab = expression(Y))
+
+# 相関係数が0
+Sigma[2, 1] <- Sigma[1, 2] <- 0
+dat <- mvrnorm(n = 10000, mu = c(0, 0), Sigma = Sigma)
+plot(x = dat[, 1], y = dat[, 2],  pch = ".", cex = 1.5, #cex.lab = 2,
+     xlim = c(-2, 2), xlab = expression(X),
+     ylim = c(-2, 2), ylab = expression(Y))
+
+# 相関係数が0.9
+Sigma[2, 1] <- Sigma[1, 2] <- 0.9
+dat <- mvrnorm(n = 10000, mu = c(0, 0), Sigma = Sigma)
+plot(x = dat[, 1], y = dat[, 2],  pch = ".", cex = 1.5, #cex.lab = 2,
+     xlim = c(-2, 2), xlab = expression(X),
+     ylim = c(-2, 2), ylab = expression(Y))
+```
+
+
+
+```{r 図2.8, echo = FALSE, results='hide'}
+#【円周上の点】
+
+# 独立ではない2変数として、中心が0で半径が1の円周上の点を生成
+angle_seq <- seq(from = -pi, to = pi, length.out = 1000)
+Z <- cbind(X = cos(angle_seq), Y = sin(angle_seq))
+
+# 散布図
+plot(Z, pch = 1, asp = 1)
+
+# 相関係数
+cor(Z)
+```
+
+
+
+```{r 図2.9, echo = FALSE, results='hide'}
+#【自己相関係数の例】
+
+# 前処理
+par(cex.lab = 1.0)
+par(mfrow = c(1, 2), pty = "s"); par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 1, 2))
+
+# 変動がない場合
+y <- ts(1:100)
+plot(y, xlab = "Time", ylab = "データ")
+acf(y, main = "", xlab = "ラグ", ylab = "自己相関係数")
+
+# 規則的な周期が存在する場合
+rad_seq <- seq(from = 0, to = 2*pi*8, length.out = 100)
+y <- ts(cos(rad_seq), freq = 2*pi)
+plot(x = rad_seq/(2*pi), y = y, type = "l", xlab = "Time [周期]", ylab = "データ");
+acf(y, main = "", xlab = "ラグ [周期]", ylab = "自己相関係数")
+
+# 後処理
+par(oldpar)
+```
+
+
+##定常過程と非定常過程
+
+```{r 図2.10, echo = FALSE, results='hide'}
+#【定常過程と非定常過程】
+
+# 乱数種の設定（再現性の確保）
+set.seed(1234)
+
+# 時系列長の設定と観測値の領域確保
+t_max <- 800
+Y <- ts(start = 1, end = t_max)
+
+# AR(1)係数
+phi <- 0.5
+
+# 観測値の生成
+Y[1] <- 0
+for (t in 2:t_max){
+  Y[t] <- phi * Y[t-1] + rnorm(n = 1)
+}
+
+# プロット
+plot(Y)
+
+# AR(1)係数
+phi <- 1.0
+
+# 観測値の生成
+Y[1] <- 0
+for (t in 2:t_max){
+  Y[t] <- phi * Y[t-1] + rnorm(n = 1)
+}
+
+# プロット
+plot(Y)
+```
+
+
+
+
+
+
+
+
+
+
+
+```{r plotをpdf化する際の終了処理, echo = FALSE, include = FALSE}
+#【plotをpdf化する際の終了処理】
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext.end()
+
+  dev.off()
+}
+```

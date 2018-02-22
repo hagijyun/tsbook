@@ -1,0 +1,143 @@
+---
+title: "コード"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=5]
+---
+
+
+```{r Setup用, echo = FALSE, include = FALSE}
+# 作業ディレクトリ・・・お好みの場所をご設定ください
+setwd("C:/cygwin/home/NOC/book/doc")
+
+# コンソール出力の文字幅
+options(width = 84)
+
+# plot関連の設定
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # PDFファイルに出力する場合
+  pdf(height = 7 / (4/3))
+
+  # フォント情報はラスタライズする
+  require(showtext)
+  font.add("meiryo", "meiryo.ttc")
+  par(family = "meiryo")
+  showtext.begin()
+}
+```
+
+
+
+#状態空間モデルにおける状態の推定
+
+##事後分布による状態の推定
+
+##状態の逐次的な求め方
+
+###簡単な例
+
+
+```{r 図6.2, echo = FALSE, results='hide'}
+#【正規分布のベイズ更新】
+
+# ベイズ更新を行うユーザ定義関数
+baysian_update <- function(pri, lik){
+  pri_prec <- 1 / pri$var
+  lik_prec <- 1 / lik$var
+
+  pos_mean <- pri$mean * pri_prec / (pri_prec + lik_prec) + lik$mean * lik_prec / (pri_prec + lik_prec)
+  pos_prec <- pri_prec + lik_prec
+
+  return(list(
+    mean = pos_mean,
+     var = 1 / pos_prec
+  ))
+}
+
+# 状態遷移を行うユーザ定義関数
+transition_update <- function(curr, trans){
+  return(list(
+    mean = curr$mean + trans$mean,
+     var = curr$var  + trans$var
+  ))
+}
+
+# 正規分布の描画をするユーザ定義関数
+bell_curve <- function(mean, sd, col = "black"){
+  curve(dnorm(x, mean = mean, sd = sd), -20, 100,
+        xlim = c(-20, 100), ylim = c(0, 0.15), ann = FALSE, axes = FALSE, col = col)
+  lines(c(mean, mean   ),
+        c(                                   0, dnorm(mean   , mean = mean, sd = sd)),
+        lty = "dotdash", col = col)
+  lines(c(mean, mean+sd),
+        c(dnorm(mean+sd, mean = mean, sd = sd), dnorm(mean+sd, mean = mean, sd = sd)),
+        lty = "dashed" , col = col)
+}
+
+# 描画に関する前処理
+oldpar <- par(no.readonly = TRUE)
+par(mfrow = c(4, 1))
+par(oma = c(2, 0, 0, 0)); par(mar = c(0, 0, 0, 0))
+
+# 事前分布
+m0 <- 0
+C0 <- 8^2
+bell_curve(mean = m0, sd = sqrt(C0))
+
+# 尤度
+y1 <- 20
+sigma2 <- 5^2
+par(new = TRUE)
+bell_curve(mean = y1, sd = sqrt(sigma2), col = "blue")
+
+# 事後分布
+posterior <- baysian_update(pri = list(mean = m0, var = C0),
+                            lik = list(mean = y1, var = sigma2))
+m1 <- posterior$mean
+C1 <- posterior$var
+bell_curve(mean = m1, sd = sqrt(C1), col = "red")
+
+# 事後分布＝事前分布
+bell_curve(mean = m1, sd = sqrt(C1))
+
+# 一期先予測分布
+nu <- 40
+sigma2_w <- 5^2
+prediction <- transition_update( curr = list(mean = m1, var = C1),
+                                trans = list(mean = nu, var = sigma2_w))
+m2_hat <- prediction$mean
+C2_hat <- prediction$var
+par(new = TRUE)
+bell_curve(mean = m2_hat, sd = sqrt(C2_hat))
+
+# 尤度
+y2 <- 80
+par(new = TRUE)
+bell_curve(mean = y2, sd = sqrt(sigma2), col = "blue")
+
+# 事後分布
+posterior <- baysian_update(pri = list(mean = m2_hat, var = C2_hat),
+                            lik = list(mean = y2, var = sigma2))
+m2 <- posterior$mean
+C2 <- posterior$var
+bell_curve(mean = m2, sd = sqrt(C2), col = "red")
+
+# 描画用の後処理
+options(oldpar)
+```
+
+
+
+
+
+```{r plotをpdf化する際の終了処理, echo = FALSE, include = FALSE}
+#【plotをpdf化する際の終了処理】
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext.end()
+
+  dev.off()
+}
+```

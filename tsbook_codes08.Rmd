@@ -1,0 +1,432 @@
+---
+title: "コード"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=7]
+---
+
+
+```{r Setup用, echo = FALSE, include = FALSE}
+# 作業ディレクトリ・・・お好みの場所をご設定ください
+setwd("C:/cygwin/home/NOC/book/doc")
+
+# コンソール出力の文字幅
+options(width = 84)
+
+# plot関連の設定
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # PDFファイルに出力する場合
+  pdf(height = 7 / (4/3))
+
+  # フォント情報はラスタライズする
+  require(showtext)
+  font.add("meiryo", "meiryo.ttc")
+  par(family = "meiryo")
+  showtext.begin()
+}
+```
+
+
+#線形・ガウス型状態空間モデルの逐次解法
+
+##カルマンフィルタ
+
+###カルマンフィルタリング
+
+```{r コード8.1, collapse=TRUE}
+#【カルマンフィルタリング（自作）】
+
+# ナイル川の流量データを観測値に設定
+y <- Nile
+t_max <- length(y)
+
+# 1時点分のカルマンフィルタリングを行う関数
+Kalman_filtering <- function(m_t_minus_1, C_t_minus_1, t){
+  # 一期先予測分布
+  a_t <- G_t %*% m_t_minus_1
+  R_t <- G_t %*% C_t_minus_1 %*% t(G_t) + W_t
+
+  # 一期先予測尤度
+  f_t <- F_t %*% a_t
+  Q_t <- F_t %*% R_t %*% t(F_t) + V_t
+
+  # カルマン利得
+  K_t <- R_t %*% t(F_t) %*% solve(Q_t)
+
+  # 状態の更新
+  m_t <- a_t + K_t %*% (y[t] - f_t)
+  C_t <- (diag(nrow(R_t)) - K_t %*% F_t) %*% R_t
+
+  # フィルタリング分布（と同時に得られる一期先予測分布）の平均と分散を返す
+  return(list(m = m_t, C = C_t,
+              a = a_t, R = R_t))
+}
+
+# 線形ガウス型状態空間のパラメータを設定（全て1×1の行列）
+G_t <- matrix(1, ncol = 1, nrow = 1); W_t <- matrix(exp(7.29), ncol = 1, nrow = 1)
+F_t <- matrix(1, ncol = 1, nrow = 1); V_t <- matrix(exp(9.62), ncol = 1, nrow = 1)
+ m0 <- matrix(0, ncol = 1, nrow = 1);  C0 <- matrix(     1e+7, ncol = 1, nrow = 1)
+
+# フィルタリング分布（と同時に得られる一期先予測分布）の平均と分散を求める
+
+# 状態（平均と共分散）の領域を確保
+m <- rep(NA_real_, t_max); C <- rep(NA_real_, t_max)
+a <- rep(NA_real_, t_max); R <- rep(NA_real_, t_max)
+
+# 時点：t = 1
+KF <- Kalman_filtering(m0, C0, t = 1)
+m[1] <- KF$m; C[1] <- KF$C
+a[1] <- KF$a; R[1] <- KF$R
+
+# 時点：t = 2〜t_max
+for (t in 2:t_max){
+  KF <- Kalman_filtering(m[t-1], C[t-1], t = t)
+  m[t] <- KF$m; C[t] <- KF$C
+  a[t] <- KF$a; R[t] <- KF$R
+}
+
+# 以降のコードは表示を省略
+
+# フィルタリング分布の95%区間のために、2.5%値と97.5%値を求める
+m_sdev <- sqrt(C)
+m_quant <- list(m + qnorm(0.025, sd = m_sdev), m + qnorm(0.975, sd = m_sdev))
+
+# 結果のプロット
+ts.plot(cbind(y, m, do.call("cbind", m_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "平均 (フィルタリング分布)", "95%区間 (フィルタリング分布)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+###カルマン予測
+
+```{r コード8.2, collapse=TRUE}
+#【カルマン予測（自作）】
+
+# カルマンフィルタリングが完了していることが前提
+
+# 予測期間
+t <- t_max    # 最終時点から
+nAhead <- 10  # 10時点分先まで
+
+# k = 1期先カルマン予測を行う関数
+Kalman_prediction <- function(a_t0, R_t0){
+  # 一期先予測分布
+  a_t1 <- G_t_plus_1 %*% a_t0
+  R_t1 <- G_t_plus_1 %*% R_t0 %*% t(G_t_plus_1) + W_t_plus_1
+
+  # 一期先予測分布の平均と分散を返す
+  return(list(a = a_t1, R = R_t1))
+}
+
+# 線形ガウス型状態空間のパラメータを設定（時不変）
+G_t_plus_1 <- G_t; W_t_plus_1 <- W_t
+
+# k期先予測分布の平均と分散を求める
+
+# 状態（平均と共分散）の領域を確保
+a_ <- rep(NA_real_, t_max + nAhead); R_ <- rep(NA_real_, t_max + nAhead)
+
+# k = 0（時点tでの0期先予測分布はフィルタリング分布に相当）
+a_[t + 0] <- m[t]; R_[t + 0] <- C[t]
+
+# k = 1〜nAhead
+for (k in 1:nAhead){
+  KP <- Kalman_prediction(a_[t + k-1], R_[t + k-1])
+  a_[t + k] <- KP$a; R_[t + k] <- KP$R
+}
+
+# 以降のコードは表示を省略
+
+# 予測分布の95%区間のために、2.5%値と97.5%値を求める
+a_ <- ts(a_, start = 1871)
+a_sdev <- sqrt(R_)
+a_quant <- list(a_ + qnorm(0.025, sd = a_sdev), a_ + qnorm(0.975, sd = a_sdev))
+
+# 結果のプロット
+ts.plot(cbind(y, a_, do.call("cbind", a_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "平均 (予測分布)", "95%区間 (予測分布)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+###カルマン平滑化
+
+```{r コード8.3, collapse=TRUE}
+#【カルマン平滑化（自作）】
+
+# カルマンフィルタリングが完了していることが前提
+
+# 1時点分のカルマン平滑化を行う関数
+Kalman_smoothing <- function(s_t_plus_1, S_t_plus_1, t){
+  # 平滑化利得
+  A_t <- C[t] %*% t(G_t_plus_1) %*% solve(R[t+1])
+
+  # 状態の更新
+  s_t <- m[t] + A_t %*% (s_t_plus_1 - a[t+1])
+  S_t <- C[t] + A_t %*% (S_t_plus_1 - R[t+1]) %*% t(A_t)
+
+  # 平滑化分布の平均と分散を返す
+  return(list(s = s_t, S = S_t))
+}
+
+# 平滑化分布の平均と分散を求める
+
+# 状態（平均と共分散）の領域を確保
+s <- rep(NA_real_, t_max); S <- rep(NA_real_, t_max)
+
+# 時点：t = t_max
+s[t_max] <- m[t_max]; S[t_max] <- C[t_max]
+
+# 時点：t = t_max-1〜1
+for (t in (t_max-1):1){
+  KS <- Kalman_smoothing(s[t+1], S[t+1], t = t)
+  s[t] <- KS$s; S[t] <- KS$S
+}
+
+# 以降のコードは表示を省略
+
+# フィルタリング分布の95%区間のために、2.5%値と97.5%値を求める
+s_sdev <- sqrt(S)
+s_quant <- list(s + qnorm(0.025, sd = s_sdev), s + qnorm(0.975, sd = s_sdev))
+
+# 結果のプロット
+ts.plot(cbind(y, s, do.call("cbind", s_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "平均 (平滑化分布)", "95%区間 (平滑化分布)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", cex = 0.6)
+```
+
+
+##例: ローカルレベルモデルの場合
+
+###目的の確認とデータの収集
+
+###データの下調べ
+
+
+
+
+###モデルの定義
+
+```{r コード8.4, collapse=TRUE}
+#【ローカルレベルモデルの定義】
+
+# 前処理
+library(dlm)
+
+# 状態空間モデルの設定
+mod <- dlmModPoly(order = 1)
+
+# モデルの内容を確認
+str(mod)
+```
+
+
+###パラメータ値の特定
+
+```{r コード8.5, collapse=TRUE}
+#【ローカルレベルモデルにおけるパラメータ値の特定】
+
+# モデルを定義・構築するユーザ定義関数
+build_dlm <- function(par) {
+  mod$W[1, 1] <- exp(par[1])
+  mod$V[1, 1] <- exp(par[2])
+
+  return(mod)
+}
+
+# パラメータの最尤推定（探索初期値を3回変えて結果を確認）
+lapply(list(c(0, 0), c(1, 10), c(20, 3)), function(parms){
+  dlmMLE(y = Nile, parm = parms, build = build_dlm)
+})
+
+# パラメータの最尤推定（ヘッセ行列を戻り値に含める）
+fit_dlm <- dlmMLE(y = Nile, parm = c(0, 0), build = build_dlm, hessian = TRUE)
+
+# デルタ法により最尤推定の（漸近的な）標準誤差をヘッセ行列から求める
+exp(fit_dlm$par) * sqrt(diag(solve(fit_dlm$hessian)))
+
+# パラメータの最尤推定結果をモデルに設定
+mod <- build_dlm(fit_dlm$par)
+
+# 結果の確認
+mod
+```
+
+
+###フィルタリング・予測・平滑化の実行
+
+####フィルタリング
+
+```{r コード8.6, collapse=TRUE}
+#【カルマンフィルタリング】
+
+# フィルタリング処理
+dlmFiltered_obj <- dlmFilter(y = Nile, mod = mod)
+
+# 結果の確認
+str(dlmFiltered_obj, max.level = 1)
+
+# フィルタリング分布の平均と標準偏差を求める
+m <- dropFirst(dlmFiltered_obj$m)
+m_sdev <- sqrt(
+            dropFirst(as.numeric(
+              dlmSvd2var(dlmFiltered_obj$U.C, dlmFiltered_obj$D.C)
+            ))
+          )
+
+# フィルタリング分布の95%区間のために、2.5%値と97.5%値を求める
+m_quant <- list(m + qnorm(0.025, sd = m_sdev), m + qnorm(0.975, sd = m_sdev))
+
+# 結果のプロット
+ts.plot(cbind(Nile, m, do.call("cbind", m_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "平均 (フィルタリング分布)", "95%区間 (フィルタリング分布)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", text.width = 32, cex = 0.6)
+```
+
+
+####予測
+
+```{r コード8.7, collapse=TRUE}
+#【カルマン予測】
+
+# 予測処理
+dlmForecasted_obj <- dlmForecast(mod = dlmFiltered_obj, nAhead = 10)
+
+# 結果の確認
+str(dlmForecasted_obj, max.level = 1)
+
+# 予測分布の平均と標準偏差を求める
+a <- ts(data = dlmForecasted_obj$a, start = c(1971, 1))
+a_sdev <- sqrt(
+            as.numeric(
+              dlmForecasted_obj$R
+            )
+          )
+
+# 予測分布の95%区間のために、2.5%値と97.5%値を求める
+a_quant <- list(a + qnorm(0.025, sd = a_sdev), a + qnorm(0.975, sd = a_sdev))
+
+# 結果のプロット
+ts.plot(cbind(Nile, a, do.call("cbind", a_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "平均 (予測分布)", "95%区間 (予測分布)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", text.width = 26, cex = 0.6)
+```
+
+
+####平滑化
+
+```{r コード8.8, collapse=TRUE}
+#【カルマン平滑化】
+
+# 平滑化処理
+dlmSmoothed_obj <- dlmSmooth(y = Nile, mod = mod)
+
+# 結果の確認
+str(dlmSmoothed_obj, max.level = 1)
+
+# 平滑化分布の平均と標準偏差を求める
+s <- dropFirst(dlmSmoothed_obj$s)
+s_sdev <- sqrt(
+            dropFirst(as.numeric(
+              dlmSvd2var(dlmSmoothed_obj$U.S, dlmSmoothed_obj$D.S)
+            ))
+          )
+
+# 平滑化分布の95%区間のために、2.5%値と97.5%値を求める
+s_quant <- list(s + qnorm(0.025, sd = s_sdev), s + qnorm(0.975, sd = s_sdev))
+
+# 結果のプロット
+ts.plot(cbind(Nile, s, do.call("cbind", s_quant)),
+        col = c("lightgray", "black", "black", "black"),
+        lty = c("solid", "solid", "dashed", "dashed"))
+
+# 凡例
+legend(legend = c("観測値", "平均 (平滑化分布)", "95%区間 (平滑化分布)"),
+       lty = c("solid", "solid", "dashed"),
+       col = c("lightgray", "black", "black"),
+       x = "topright", text.width = 26, cex = 0.6)
+```
+
+
+###結果の確認と吟味
+
+####尤度
+
+```{r コード8.9, collapse=TRUE}
+#【線形・ガウス型状態空間における尤度】
+
+# 「負の」対数尤度の算出
+dlmLL(y = Nile, mod = mod)
+```
+
+
+####イノベーション(予測誤差)
+
+```{r コード8.10, collapse=TRUE}
+#【イノベーションを用いたモデルの診断】
+
+# 表示領域の調整
+oldpar <- par(no.readonly = TRUE)
+par(oma = c(0, 0, 0, 0)); par(mar = c(4, 4, 3, 1))
+
+# 自己相関の確認
+tsdiag(object = dlmFiltered_obj)
+par(oldpar)                            # 表示に関するパラメータを元に戻す
+
+# 正規性の確認
+# 規格化イノベーションの取得
+e <- residuals(object = dlmFiltered_obj, sd = FALSE)
+
+# 結果の確認
+e
+
+# Q-Qプロットの表示
+qqnorm(e)
+qqline(e)     # 25%点と75%点を通る直線をガイドラインとするため、傾きは45度にはならない
+```
+
+
+
+
+```{r plotをpdf化する際の終了処理, echo = FALSE, include = FALSE}
+#【plotをpdf化する際の終了処理】
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext.end()
+
+  dev.off()
+}
+```

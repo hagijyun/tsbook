@@ -1,0 +1,79 @@
+---
+title: "コード"
+output:
+  html_document:
+    number_section: true
+    pandoc_args: [--number-offset=0]
+---
+
+
+```{r Setup用, echo = FALSE, include = FALSE}
+# 作業ディレクトリ・・・お好みの場所をご設定ください
+setwd("C:/cygwin/home/NOC/book/doc")
+
+# コンソール出力の文字幅
+options(width = 84)
+
+# plot関連の設定
+SAVE_PLOT_PDF <- F
+if (SAVE_PLOT_PDF == TRUE){
+  # PDFファイルに出力する場合
+  pdf(height = 7 / (4/3))
+
+  # フォント情報はラスタライズする
+  require(showtext)
+  font.add("meiryo", "meiryo.ttc")
+  par(family = "meiryo")
+  showtext.begin()
+}
+```
+
+
+
+#はじめに
+
+##時系列分析とは
+
+
+```{r 図1.1, echo = FALSE, results='hide'}
+#【ナイル川における年間流量に関するデータ（1章）】
+
+# データの内容を表示
+Nile
+
+# データを図示
+plot(Nile)
+```
+
+
+```{r 図1.2, echo = FALSE, results='hide'}
+#【大気中の二酸化炭素濃度に関するデータ（1章）】
+
+# データの読み込み
+Ryori <- read.csv("CO2.csv")
+
+# データをts型に変換し、2014年12月までで打ち切る
+y_all <- ts(data = Ryori$CO2, start = c(1987, 1), frequency = 12)
+y <- window(y_all, end = c(2014, 12))
+
+# データの内容を表示
+y
+
+# データを図示
+plot(y)
+```
+
+
+
+
+
+
+```{r plotをpdf化する際の終了処理, echo = FALSE, include = FALSE}
+#【plotをpdf化する際の終了処理】
+
+if (SAVE_PLOT_PDF == TRUE){
+  showtext.end()
+
+  dev.off()
+}
+```
