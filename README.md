@@ -7,6 +7,7 @@
 
 # コード
 ## Rのコード
+ライブラリがインストール済であること、ファイルの先頭から順に実行することを想定しています。
 章毎にR Markdown形式でまとめてあります。
 - tsbook_codes01.Rmd
 - tsbook_codes02.Rmd
@@ -22,9 +23,9 @@
 - tsbook_codes12.Rmd
 - tsbook_codes0h.Rmd
 
-ライブラリがインストール済であること、ファイルの先頭から順に実行することを想定しています。
-
 ## Stan等のコード
+Rのコードと同一ディレクトリに登録してあることを想定しています。
+モデル毎にテキストファイルでまとめてあります。
 - model10-1.stan
 - model10-2.stan
 - model10-3.stan
@@ -34,8 +35,13 @@
 - modelH-1.biips
 
 # データ
+Rのコードと同一ディレクトリに登録してあることを想定しています。
+
+## Rのバイナリ形式
 - ArtifitialLocalLevelModel.RData
 - BenchmarkNonLinearModel.RData
+
+## CSV形式
 - CO2.csv
 - BEER.csv
 - FOOD.csv
