@@ -1,13 +1,13 @@
 # tsbook
 
-##はじめに
+## はじめに
 本サイトは、書籍『基礎からわかる時系列分析』（技術評論社，2018）のサポートサイトです。
 書籍で使用したコードやデータを公開しています。
 文字コードはUTF-8を使用しています。
 
 
-##コード
-###Rのコード
+## コード
+### Rのコード
 章毎にR Markdown形式でまとめてあります。
 - tsbook_codes01.Rmd
 - tsbook_codes02.Rmd
@@ -25,7 +25,7 @@
 
 ライブラリがインストール済であること、ファイルの先頭から順に実行することを想定しています。
 
-###Stan等のコード
+### Stan等のコード
 - model10-1.stan
 - model10-2.stan
 - model10-3.stan
@@ -34,7 +34,7 @@
 - model12-1.stan
 - modelH-1.biips
 
-##データ
+## データ
 - ArtifitialLocalLevelModel.RData
 - BenchmarkNonLinearModel.RData
 - CO2.csv
@@ -44,5 +44,5 @@
 - NIKKEI225.csv
 - NINTENDO.csv
 
-##正誤表
+## 正誤表
 T.B.D.
