@@ -60,3 +60,4 @@ https://www.amazon.co.jp/%E5%9F%BA%E7%A4%8E%E3%81%8B%E3%82%89%E3%82%8F%E3%81%8B%
 
 技術評論社
 http://gihyo.jp/book/series?s=Data%20Science%20Library
+
