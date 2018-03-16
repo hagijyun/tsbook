@@ -55,11 +55,6 @@ Rのコードと同一ディレクトリに登録してあることを想定し�
 T.B.D.
 
 # 関連リンク
-Amazon
+Amazon：https://www.amazon.co.jp/%E5%9F%BA%E7%A4%8E%E3%81%8B%E3%82%89%E3%82%8F%E3%81%8B%E3%82%8B%E6%99%82%E7%B3%BB%E5%88%97%E5%88%86%E6%9E%90-%E2%80%95R%E3%81%A7%E5%AE%9F%E8%B7%B5%E3%81%99%E3%82%8B%E3%82%AB%E3%83%AB%E3%83%9E%E3%83%B3%E3%83%95%E3%82%A3%E3%83%AB%E3%82%BF%E3%83%BBMCMC%E3%83%BB%E7%B2%92%E5%AD%90%E3%83%95%E3%82%A3%E3%83%AB%E3%82%BF%E3%83%BC-%E8%90%A9%E5%8E%9F-%E6%B7%B3%E4%B8%80%E9%83%8E/dp/4774196460/ref=sr_1_1?ie=UTF8&qid=1521190845&sr=8-1&keywords=%E8%90%A9%E5%8E%9F%E6%B7%B3%E4%B8%80%E9%83%8E
 
-https://www.amazon.co.jp/%E5%9F%BA%E7%A4%8E%E3%81%8B%E3%82%89%E3%82%8F%E3%81%8B%E3%82%8B%E6%99%82%E7%B3%BB%E5%88%97%E5%88%86%E6%9E%90-%E2%80%95R%E3%81%A7%E5%AE%9F%E8%B7%B5%E3%81%99%E3%82%8B%E3%82%AB%E3%83%AB%E3%83%9E%E3%83%B3%E3%83%95%E3%82%A3%E3%83%AB%E3%82%BF%E3%83%BBMCMC%E3%83%BB%E7%B2%92%E5%AD%90%E3%83%95%E3%82%A3%E3%83%AB%E3%82%BF%E3%83%BC-%E8%90%A9%E5%8E%9F-%E6%B7%B3%E4%B8%80%E9%83%8E/dp/4774196460/ref=sr_1_1?ie=UTF8&qid=1521190845&sr=8-1&keywords=%E8%90%A9%E5%8E%9F%E6%B7%B3%E4%B8%80%E9%83%8E
-
-技術評論社
-
-http://gihyo.jp/book/series?s=Data%20Science%20Library
-
+技術評論社：http://gihyo.jp/book/series?s=Data%20Science%20Library
