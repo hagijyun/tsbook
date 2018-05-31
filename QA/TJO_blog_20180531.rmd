@@ -1,0 +1,183 @@
+今回の問題を、カルマン平滑化（dlmパッケージ利用）で確認した結果を共有します。
+
+まず、データを生成します（この部分はブログからの転載です）。
+私の手元ではおそらく環境依存のため、ブログの結果とは少し異なる結果が得られています。
+
+```{r データの生成}
+# ブログより転載
+set.seed(1001)
+x1 <- runif(100, 3, 5)
+set.seed(1002)
+x2 <- runif(100, 4, 7)
+set.seed(1003)
+x3 <- runif(100, 8, 15)
+
+sd1 <- 0.1
+sd2 <- 0.2
+sd3 <- 0.05
+sd_y <- 5
+
+b1 <- rep(0, 100)
+b1[1] <- 2
+for (i in 2:100){
+    b1[i] <- b1[i-1] + rnorm(1, 0, sd1)
+}
+b2 <- rep(0, 100)
+b2[1] <- 3
+for (i in 2:100){
+    b2[i] <- b2[i-1] + rnorm(1, 0, sd2)
+}
+b3 <- rep(0, 100)
+b3[1] <- 0.5
+for (i in 2:100){
+    b3[i] <- b3[i-1] + rnorm(1, 0, sd3)
+}
+b0 <- 10
+
+y <- rep(0, 100)
+for (i in 1:100){
+    y[i] <- b0 + b1[i] * x1[i] + b2[i] * x2[i] + b3[i] * x3[i]
+}
+y <- y + rnorm(100, 0, sd_y)
+```
+
+続いてdlmパッケージで分析してみます。
+今回はモデル生成過程が分かっているため、その通りのモデルを設定しています。
+
+```{r dlmパッケージで確認1}
+# dlmパッケージで確認（萩原）
+require(dlm)
+
+# 計画行列
+mx <- cbind(x1, x2, x3)
+
+# モデルの定義（切片は時不変）
+build_dlm_REG <- function(par) {
+  dlmModReg(X = mx, dW = c(0, exp(par[1:3])), dV = exp(par[4]))
+}
+
+# パラメータの最尤推定（ヘッセ行列を戻り値に含める）
+fit_dlm_REG <- dlmMLE(y = y, parm = rep(0, 4), build = build_dlm_REG, hessian = TRUE)
+
+# 最尤推定の標準誤差は推定値の何割か？（観測雑音以外は大きい！）
+sqrt(diag(solve(fit_dlm_REG$hessian)))
+
+# モデルに設定
+mod <- build_dlm_REG(fit_dlm_REG$par)
+
+# モデルの内容を確認（観測行列が時変）
+str(mod)
+
+# パラメータの最尤推定値を真値と比較
+# 観測雑音（悪くない）
+sqrt(mod$V); sd_y
+
+# 状態雑音（今一つ）
+sqrt(diag(mod$W)); c(0, sd1, sd2, sd3)
+```
+
+パラメータ（状態雑音の分散）の最尤推定では、標準誤差が大きいことが分かります。
+そのためか、状態雑音の最尤推定値も今一つの結果になっています。
+この様な場合パラメータの推定にはベイズ推定の方が無難かと思われますが、取りあえずこの結果を信頼して状態の推定（平滑化）を進めてみます。
+
+```{r dlmパッケージで確認2}
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod)
+s <- dropFirst(dlmSmoothed_obj$s)
+
+# 状態の推定値（平均値）を回帰式に設定した値と観測値を比較（悪くない）
+y_KalmanSmoothing <- rowSums(cbind(1, mx) * s)
+ts.plot(cbind(y, y_KalmanSmoothing), col = c(1, 2))
+
+# 状態の推定値（平均値）を真値と比較（今一つ）
+c(b0, s[1, 1])  # 時不変なのでグラフ省略
+ts.plot(cbind(b1, s[, 2]), col = c(1, 2))
+ts.plot(cbind(b2, s[, 3]), col = c(1, 2))
+ts.plot(cbind(b3, s[, 4]), col = c(1, 2))
+```
+
+今度は、状態の推定値（平均値）の結果を確認しています。
+回帰式から導出された値と観測値を比較すると、悪くはない印象です。
+ただし真値と比較すると、今一つといった感じです。
+
+ここで、パラメータが真値だとしたら状態の推定精度は改善するか？という疑問がわきましたので、確認してみました。
+
+```{r dlmパッケージで確認3}
+# パラメータに真値を設定したモデル
+mod_true <- dlmModReg(X = mx, dW = c(0, sd1^2, sd2^2, sd3^2), dV = sd_y^2)
+
+# カルマン平滑化
+dlmSmoothed_obj <- dlmSmooth(y = y, mod = mod_true)
+s_mod_true <- dropFirst(dlmSmoothed_obj$s)
+
+# 状態の推定値（平均値）を比較（真値、パラメータを最尤推定したモデルの結果、パラメータ真値のモデルの結果）
+c(b0, s[1, 1], s_mod_true[1, 1])  # 時不変なのでグラフ省略
+ts.plot(cbind(b1, s[, 2], s_mod_true[, 2]), col = c(1, 2, 3))
+ts.plot(cbind(b2, s[, 3], s_mod_true[, 3]), col = c(1, 2, 3))
+ts.plot(cbind(b3, s[, 4], s_mod_true[, 4]), col = c(1, 2, 3))
+```
+
+この結果を見ると、モデルのパラメータを真値に設定すると状態（平均値）の推定精度は若干向上するものの、限界はある印象を受けます。
+従って、回帰係数の推定精度を追求する観点では、今回のデータは元々やや手ごわいものになっているのではないかと感じます。
+
+続いて、stanでパラメータもベイズ推定した場合との比較を行います。
+stanの推定自体は、ブログのコードの転載です。
+
+```{r stanによる推定1}
+# ブログより転載
+dat <- list(N = nrow(mx), M = ncol(mx), y = y, X = mx)
+library(rstan)
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+fit <- stan(file = 'dlm_tv.stan', data = dat, iter = 1000, chains = 4)
+
+options(max.print = 10000)
+fit
+```
+
+元々手ごわい問題であるためか、stanの推定において警告が出ており、推定結果のn_effも小さいものが多い印象です。
+ただし、パラメータのベイズ推定値（平均値）は最尤推定値より真値に近くなっているようです。
+続いて状態の推定結果を確認します（ブログの記載に、比較用に少しだけ手を加えています）。
+
+```{r stanによる推定2}
+slength <- 2000
+fit.smp <- extract(fit)
+tmp <- density(fit.smp$d_int)
+d_int <- tmp$x[tmp$y == max(tmp$y)]
+tmp <- density(fit.smp$s_q)
+s_q <- tmp$x[tmp$y == max(tmp$y)]
+s_beta <- rep(0, ncol(mx))
+for (i in 1:ncol(mx)) {
+    tmp <- density(fit.smp$beta[(slength*(i-1)+1):(slength*i)])
+#   tmp <- density(fit.smp$s_b[, i])                              # s_betaはブログではその後使われていないため無害なのですが、βの標準偏差の点推定値を意図されている場合、直前の行をこの行のように修正する必要があるのではないかと思います
+    s_beta[i] <- tmp$x[tmp$y == max(tmp$y)]
+}
+tmp <- fit.smp$beta
+beta <- matrix(0, nrow = nrow(mx), ncol = ncol(mx))
+for (i in 1:nrow(mx)){
+    for (j in 1:ncol(mx)){
+        tmpb <- density(tmp[, i, j])
+        beta[i, j] <- tmpb$x[tmpb$y == max(tmpb$y)]
+    }
+}
+y_pred <- rep(0, 100)
+for (i in 1:100){
+    y_pred[i] <- d_int + beta[i, 1] * x1[i] + beta[i, 2] * x2[i] + beta[i, 3] * x3[i]
+}
+
+matplot(cbind(y, y_pred, y_KalmanSmoothing), type = 'l', xlab = '', ylab = '')
+legend('topright', legend = c('Data', 'Fitted', 'KalmanSmoothing'), col = c(1,2,3), lty = c(1,2,3))
+
+matplot(cbind(b1, beta[, 1], s[, 2]), type = 'l', xlab = '', ylab = '', lwd = 2, main = 'Beta 1')
+matplot(cbind(b2, beta[, 2], s[, 3]), type = 'l', xlab = '', ylab = '', lwd = 2, main = 'Beta 2')
+matplot(cbind(b3, beta[, 3], s[, 4]), type = 'l', xlab = '', ylab = '', lwd = 2, main = 'Beta 3')
+```
+
+回帰式から導出された値は、カルマン平滑化の場合と同様悪くはありません。
+ただし状態の点推定値自体は、カルマン平滑化に比べて少しは良くなったかな？という程度の印象です。
+
+今回の私の方での検証や、尾崎様の方で追加された時不変のモデルでの検証を通じた教訓をあえてまとめると、「同じ問題を色々なアプローチで試し、結果を比較するのは有益」という所でしょうか（当たり前ですかね．．．）
+
+あと蛇足ですが、無害なのですが一行だけコードについて理解しきれないところがありコメントさせていただいておりますので、ご確認を頂けると幸いです。
+
+よろしくお願いします。
