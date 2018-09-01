@@ -1,0 +1,169 @@
+Shuma様のブログ
+https://shumagit.github.io/myblog/2018/08/15/learn-dlm-1/
+で著書のご紹介を頂きました。
+その中でのdlmの可視化の処理が面倒との感想に触発されて、ユーティリティ関数を作成してみました。
+
+まず、dlmを用いてNileデータの分析を行います（この部分はブログからの転載です）。
+
+```{r ブログより転載}
+library(dlm)
+
+# ブログより転載
+Nile.train <- Nile[1:90]
+
+build_model <- function(parm){
+  dlmModPoly(
+    order = 1, 
+    ## 負の部分を探索させないようにexpを取る
+    dV = exp(parm[1]),
+    dW = exp(parm[2]))
+}
+
+## 最尤推定
+fit <- dlmMLE(y = Nile.train, 
+              parm = c(1, 1),
+              build = build_model)
+## 結果の確認
+fit
+
+## 最尤推定値を使ってモデルを組み直す
+model.fitted <- build_model(fit$par)
+
+## filteringを行う
+model.filtered <- dlmFilter(y = Nile.train,
+                            mod = model.fitted)
+
+str(model.filtered, 1)
+
+## 平滑化
+model.smoothed <- dlmSmooth(y = Nile.train, 
+                            mod = model.fitted)
+
+str(model.smoothed, 1)
+
+## 予測
+model.forecast <- dlmForecast(mod = model.filtered,
+                              nAhead = 10)
+
+str(model.forecast, 1)
+```
+
+dlmにおいて状態の信頼区間の値を求めるユーティリティ関数predict.dlm()の定義は、以下のようになっています。
+この関数は、KFASのpredict.SSModel()を参考にしており、dlmFilter(), dlmSmooth(), dlmForecast()の出力をそのまま入力に設定すれば、信頼区間の値を出力します。
+コードには冗長な部分も残っていますが、ご容赦ください。
+
+```{r dlmにおいて状態の信頼区間の値を求めるユーティリティ関数}
+# dlmにおいて状態の信頼区間の値を求めるユーティリティ関数
+#
+# 動作前提：ライブラリdlmがロード済みであること
+# 参考：KFASのpredict.SSModel()
+#
+# 入力
+# obj: dlmFilter(), dlmSmooth(), dlmForecast()の出力
+# interval: 状態の信頼区間（現時点でその他の値は未使用）
+# level: 信頼区間の値
+# states: 抽出対象となる状態の番号（ベクトル）
+#
+# 出力
+# 状態（複数存在する場合はそれらの和）に関する平均値・信頼区間の下側値・信頼区間の上側値を並べた行列（行が時間方向）
+
+
+predict.dlm <- function(object, interval = "confidence", level = 0.95, states = c(1)){
+  # 分位点の下限・上限を設定
+  band <- 1 - level; conf_l <- 0 + band/2; conf_u <- 1 - band/2
+
+  # オブジェクトに含まれる名前の一覧を頼りに処理を分ける
+  obj_name <- names(object)
+
+  # フィルタリング
+  if ("U.C" %in% obj_name){
+    # 平均ベクトル
+    m <- dropFirst(object$m)                                                          # 平均ベクトルを求め、事前分布の分をカット
+    m_ts <- m                                                                         # ts属性のために別名で保存
+    if (is.matrix(m) == FALSE){ m <- matrix(m, ncol = 1) }                            # 状態が1つだけの場合は、処理の統一のため1列の行列に変換する
+    sum_m <- rowSums(m[, states, drop = FALSE])                                       # 複数の状態の和の平均は、各々の平均の和
+
+    # 分散・共分散行列
+    C <- dlmSvd2var(object$U.C, object$D.C); C <- C[-1]                               # 分散・共分散行列のリストを求め、事前分布の分をカット
+    sum_sdev <- sapply(C, function(cov_mat){ sqrt(sum(cov_mat[states, states])) })    # 複数の状態の和の分散は、分散・共分散行列の全ての要素の和
+
+    # 平均値・下限値・上限値をまとめる
+    res <- cbind(sum_m, sum_m + qnorm(conf_l, sd = sum_sdev), sum_m + qnorm(conf_u, sd = sum_sdev))
+    colnames(res) <- c("mean", "lower", "upper")                                      # 列名の設定
+    if (is.ts(m_ts) == TRUE){ res <- ts(res); tsp(res) <- tsp(m_ts) }                 # ts属性があれば、その設定
+
+    return(res)
+  # 平滑化
+  }else if ("U.S" %in% obj_name){
+    # 平均ベクトル
+    s <- dropFirst(object$s)                                                          # 平均ベクトルを求め、事前分布の分をカット
+    s_ts <- s                                                                         # ts属性のために別名で保存
+    if (is.matrix(s) == FALSE){ s <- matrix(s, ncol = 1) }                            # 状態が1つだけの場合は、処理の統一のため1列の行列に変換する
+    sum_s <- rowSums(s[, states, drop = FALSE])                                       # 複数の状態の和の平均は、各々の平均の和
+
+    # 分散・共分散行列
+    S <- dlmSvd2var(object$U.S, object$D.S); S <- S[-1]                               # 分散・共分散行列のリストを求め、事前分布の分をカット
+    sum_sdev <- sapply(S, function(cov_mat){ sqrt(sum(cov_mat[states, states])) })    # 複数の状態の和の分散は、分散・共分散行列の全ての要素の和
+
+    # 平均値・下限値・上限値をまとめる
+    res <- cbind(sum_s, sum_s + qnorm(conf_l, sd = sum_sdev), sum_s + qnorm(conf_u, sd = sum_sdev))
+    colnames(res) <- c("mean", "lower", "upper")                                      # 列名の設定
+    if (is.ts(s_ts) == TRUE){ res <- ts(res); tsp(res) <- tsp(s_ts) }                 # ts属性があれば、その設定
+
+    return(res)
+  # 予測
+  }else if ("R" %in% obj_name){
+    # 平均ベクトル
+    a <- object$a                                                                     # 平均ベクトルを求める
+    a_ts <- a                                                                         # ts属性のために別名で保存
+    if (is.matrix(a) == FALSE){ a <- matrix(a, ncol = 1) }                            # 状態が1つだけの場合は、処理の統一のため1列の行列に変換する
+    sum_a <- rowSums(a[, states, drop = FALSE])                                       # 複数の状態の和の平均は、各々の平均の和
+
+    # 分散・共分散行列
+    R <- object$R                                                                     # 分散・共分散行列のリストを求める
+    sum_sdev <- sapply(R, function(cov_mat){ sqrt(sum(cov_mat[states, states])) })    # 複数の状態の和の分散は、分散・共分散行列の全ての要素の和
+
+    # 平均値・下限値・上限値をまとめる
+    res <- cbind(sum_a, sum_a + qnorm(conf_l, sd = sum_sdev), sum_a + qnorm(conf_u, sd = sum_sdev))
+    colnames(res) <- c("mean", "lower", "upper")                                      # 列名の設定
+    if (is.ts(a_ts) == TRUE){ res <- ts(res); tsp(res) <- tsp(a_ts) }                 # ts属性があれば、その設定
+
+    return(res)
+  # その他の場合
+  }else{
+    warning("引数のobjectが想定外の内容です。")
+    return(NA)
+  }
+}
+```
+
+関数の動作結果は以下の通りです。
+
+```{r Nileの分析結果で確認}
+# Nileの開始・終了時点
+Nile_start <- tsp(Nile)[1]
+Nile_end   <- tsp(Nile)[2]
+
+## フィルタリング分布の平均と90%区間をプロットする
+filtered <- predict.dlm(model.filtered, level = 0.9)
+filtered
+filtered <- ts(filtered, start = Nile_start)
+matplot(ts.union(Nile, filtered), type = "l")
+
+## 平滑化分布の平均と90%区間をプロットする
+smoothed <- predict.dlm(model.smoothed, level = 0.9)
+smoothed
+smoothed <- ts(smoothed, start = Nile_start)
+matplot(ts.union(Nile, smoothed), type = "l")
+
+## 予測分布の平均と90%区間をプロットする
+forecast <- predict.dlm(model.forecast, level = 0.9)
+forecast
+forecast <- ts(forecast, end = Nile_end)
+matplot(ts.union(Nile, forecast), type = "l")
+
+## フィルタリング分布・平滑化分布・予測分布の平均をプロットする
+matplot(ts.union(Nile, filtered[, "mean"], smoothed[, "mean"], forecast[, "mean"]), type = "l")
+```
+
+以上、ご参考まで。
